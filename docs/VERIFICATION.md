@@ -1,89 +1,81 @@
-# Upgrade verification — 4 November 2026
+# Audio-only verification — 4 November 2026
 
-Implementation branch: `codex/odia-listening-upgrade`.
-Baseline: `c651fd72ceef6619e32a2565eae412729d3c33bb`.
+Branch: `codex/odia-listening-upgrade`. The public branch, Pages settings and
+PurchaseShield working tree are unchanged.
 
-The existing public site has not been replaced. No Pages configuration, billing,
-domain, database or external service account was changed. PurchaseShield's
-separate working tree was not edited.
+## Current implementation
 
-## Implemented scope
+- Removed the entire YouTube/video section, loader and API calls.
+- Added Spotify's official, fully visible 80px compact audio embed, minimum width
+  280px. The original art is now a small static album illustration.
+- Replaced inherited broken/unverified playback IDs with seven official Spotify
+  title/known-artist catalogue matches. Twelve uncertain recordings have clearly
+  labelled official candidate links. E Banara Chhai remains unresolved; an artist
+  mismatch was rejected rather than silently substituted.
+- Preserved favorites, search, recent actual playback, safe browser preferences,
+  stable/legacy links, manual next/previous, shuffle and share fallbacks.
+- Removed unsupported duplicate seek/volume/repeat controls. Spotify's native
+  compact player owns its playback controls. The app does not infer track end or
+  automatic repeat from a preview stopping.
+- No application pause on hiding a tab or scrolling. No forced-resume loop,
+  hidden video, stream extraction, third-party proxy or rehosting is used.
 
-| Planned area | Delivered |
-|---|---|
-| Baseline/catalogue | Desktop/mobile baseline captures; twenty original entries with stable IDs, strict numbered/permanent links, validated source format and explicit unverified status |
-| Playback | Visible iframe, lazy API, cue without autoplay, accurate state feedback, retry/timeouts, race fencing, repeat modes, shuffle history, volume restore and offline feedback; no application-forced pause on scrolling or tab hiding |
-| Design/accessibility | Responsive maroon/cream/gold design, original artwork, semantic song list, native dialogs with explicit focus restoration, labelled controls, visible focus and reduced-motion styling |
-| Personal features | Favorites, recently played after real PLAYING events, last selection/mode/volume preferences, safe temporary fallback, namespaced clear, native/clipboard/manual sharing |
-| Performance/presentation | Local fonts, optimized backgrounds, favicon, sharing image, metadata, helpful 404 and static release build |
-| Maintenance | README, catalogue guidance, npm lockfile, pure logic tests and reproducible provider-mocked browser regression suite |
+## Checks executed
 
-## Executed checks
+- `npm run check`: JavaScript syntax passed, including the new source registry.
+- `npm test`: all 11 Node regression tests passed.
+- `npm run build`: the static release includes the source registry and excludes
+  original PNGs, development files and artifacts.
+- `npm run test:browser`: 12 audio workflow groups passed in Chromium 153.0.8010.12.
+- `python tests/browser_test.py --browser firefox`: the same groups passed in
+  Firefox 155.0.
+- `python tests/browser_test.py --release`: the same 12 groups passed against the
+  built static release in Chromium.
+- `python tests/browser_test.py --browser webkit`: the same groups passed on the
+  final source in Playwright WebKit 26.6 on Windows. An earlier transient 320px
+  overflow failure was not reproduced by the final suite or ten repeated Terra
+  resize checks. No speculative CSS fix is claimed.
+- Terra inspected audio-only screenshots at 320/390/768/1440 and short landscape.
+  The loaded iframe measured 288×80 at a 320px viewport. The suite checks enlarged
+  root text and no horizontal overflow, with zero YouTube/video requests.
 
-| Command/check | Observed result |
-|---|---|
-| `npm run check` | All three application JavaScript modules passed syntax checks |
-| `npm test` | 11 Node tests passed, 0 failed |
-| `npm run build` | Static `dist/` release created, with no runtime dependencies |
-| `npm run test:browser` | 16 workflow groups passed in Chromium 153.0.8010.12 |
-| `python tests/browser_test.py --browser firefox` | Same 16 groups passed in Firefox 155.0 |
-| `python tests/browser_test.py --browser webkit` | Same 16 groups passed in Playwright WebKit 26.6 on Windows |
-| `python tests/browser_test.py --release` | Same 16 groups passed against the built `dist/` release in Chromium |
-| `git diff --check` | Passed after removing a trailing blank line |
-| Real, unmocked YouTube initialization | API request failed `net::ERR_CERT_AUTHORITY_INVALID`; retry and external links appeared, with no JavaScript page error |
-| Initial page network | No third-party request before intentional video load/play |
-| Existing Pages address | HTTPS HEAD returned 200; deployment settings were not changed |
+The browser suite uses mocked provider events to exercise actual playback state,
+no false recent history on load, lazy loading without autoplay, latest-selection
+races, retry, native pause state, stopping old audio on an unmatched selection,
+storage denial/corruption, sharing and focus restoration. It does not play real
+provider music or establish full-track entitlement.
 
-The browser groups exercise search/empty states, favorites persistence, actual
-play-event history, keyboard/dialog focus, play/pause/seek/volume, repeat modes,
-shuffled history, iframe visibility, distant mobile selection,
-embedding errors/retry, API failures, delayed startup, offline/retry races,
-strict links, storage denial/corruption, namespaced clear and manual sharing.
+## Real source check
 
-At the user's request, application-forced pauses on tab hiding and scrolling
-were removed after the initial upgrade. Regression checks now simulate hidden
-document signals during playback and initialization, and check queue advancement
-while hidden. These checks prove the application does not issue those extra
-pause calls; they do not prove audible playback while an actual device is
-minimized, suspended or locked. No browser/YouTube restriction is bypassed and no
-automatic resume loop was added. The existing real-YouTube certificate limit
-still prevents end-to-end audio confirmation here.
+Separate unmocked Chromium checks loaded the exact user-reported songs:
 
-All automated player responses are mocked. They do not request or play music
-from a provider. Tests run under the `/Odia_gita/` project subpath and take
-screenshots at 320×740, 390×844, 768×1024, 1440×1000 and 844×390, plus a check
-with 200% root font size. No horizontal overflow was observed. The loaded
-iframe was additionally inspected at 288×200 in a 320px viewport.
+| Song | Official source | Observed provider behavior |
+|---|---|---|
+| Faguna Re Faguna | Spotify `4JFanZrSD5tDjDR2EKF7aq` | Provider emitted PLAYING; iframe explicitly displayed Preview, correct title and Babul Supriyo/Ira Mohanty credits |
+| Jhum Jhum | Spotify `3fufhbcrcSxpkhj0SPF26j` | Provider emitted PLAYING; iframe explicitly displayed Preview, correct title and Kabita Krishna Murrti/Prosan Jeet credits |
 
-Terra inspected populated desktop/mobile screenshots and fixed wrapping, touch
-targets, the pause icon and a selector that initially hid the real iframe.
-Root also inspected the desktop/mobile output against the baseline.
+Separate official playback-update observations confirmed advancing media time
+for both: Faguna Re Faguna reached 1.739s of a 21.753s preview, and Jhum Jhum
+reached 2.057s of a 29.713s preview. These establish preview progression only;
+they do not establish full-song entitlement or audible output on another device.
 
-## Image measurements
+No JavaScript page errors were observed. A canceled preview request was logged
+for the first track; no full-song success is inferred from network loading or
+metadata. Numeric progress observations, screenshots and JSON results are kept
+in gitignored `artifacts/`.
 
-| Background | Original PNG | Optimized WebP | Reduction |
-|---|---:|---:|---:|
-| Desktop | 2,482,634 bytes | 155,938 bytes | 93.72% |
-| Mobile | 2,442,892 bytes | 116,672 bytes | 95.22% |
+## Limits and follow-up
 
-Original PNGs remain in source for provenance; the release build excludes them.
-These measurements describe assets, not an invented Lighthouse score or a
-guaranteed speed improvement on every network.
+These signed-out previews are not full songs. Full playback can depend on the
+listener's account, region, browser DRM and provider entitlement. Neither this
+site nor its tests remove those restrictions. Full native audio would require
+authorized complete audio sources, which have not been supplied or established.
 
-## Remaining external/manual verification
+All twenty source identities were researched; seven are catalogue matches and
+thirteen originals remain uncertain. See `AUDIO_SOURCE_RESEARCH.md` for primary
+links and specific identity cautions. Metadata does not establish original
+master equivalence. Physical phone/Safari and assistive-technology listening
+checks are not claimed; WebKit on Windows is engine coverage only.
 
-- Confirm all twenty recordings and embedding permissions on a network that can
-  access YouTube. Every direct metadata request here failed TLS validation.
-- Review inherited artist credits and add accurate Odia titles/film/year data.
-  No spelling, year, film or recording replacement was invented. Film/year
-  filters are deferred until verified metadata supports them.
-- Check a physical iPhone/Android device and actual Safari. Playwright WebKit on
-  Windows is engine coverage, not a physical Safari/device test.
-- Conduct assistive-technology listening checks if needed; keyboard, semantic
-  labels and dialog behaviour were checked, but no complete accessibility
-  certification or screen-reader audit is claimed.
-- Review the branch before merging to the published branch. Successful mocked
-  tests do not remove YouTube's region, embedding or browser playback limits.
-
-See `SOURCE_REVIEW.md` for per-song verification status. Local screenshots,
-network observations and JSON test results are in gitignored `artifacts/`.
+The earlier YouTube investigation in `SOURCE_REVIEW.md` is retained as historical
+context; it no longer describes the current player or source status.

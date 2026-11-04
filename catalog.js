@@ -1,3 +1,5 @@
+import { audioSources } from './sources.js';
+
 const entries = [
   ['faguna-re-faguna', 'Faguna Re Faguna', 'Babul Supriyo, Ira Mohanty', 'OiJmJQefcu4'],
   ['jhum-jhum', 'Jhum Jhum', 'Kabita Krishnamurthy, Prosan Jeet', '5cXf1t57NqE'],
@@ -22,12 +24,25 @@ const entries = [
 ];
 
 export const isYoutubeId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{11}$/.test(value);
+export const isSpotifyId = value => typeof value === 'string' && /^[A-Za-z0-9]{22}$/.test(value);
 // Original credits and source IDs are retained as unverified collection metadata.
 // A structurally valid ID is not evidence that a video is available or correctly credited.
-export const tracks = Object.freeze(entries.map(([id, title, artist, youtubeId]) => Object.freeze({
-  id, title, artist, youtubeId: isYoutubeId(youtubeId) ? youtubeId : null, sourceStatus: 'unverified'
-})));
+export const tracks = Object.freeze(entries.map(([id, title, artist, youtubeId]) => {
+  const source = audioSources[id];
+  return Object.freeze({
+    id, title, artist: source?.artists?.join(', ') || artist, youtubeId: isYoutubeId(youtubeId) ? youtubeId : null,
+    spotifyId: isSpotifyId(source?.spotifyId) ? source.spotifyId : null,
+    appleMusic: source?.appleMusic || null,
+    candidateUrl: source?.candidateUrl || null,
+    candidateLabel: source?.candidateLabel || null,
+    sourceStatus: source?.spotifyId ? 'matched' : source?.candidateUrl ? 'candidate' : 'unmatched',
+    matchNote: source?.matchNote || null
+  });
+}));
 export const TRACKS = tracks;
 export const artistLabel = track => track.artist || 'Artist unknown';
 export const youtubeUrl = track => isYoutubeId(track.youtubeId) ? `https://www.youtube.com/watch?v=${track.youtubeId}` : null;
-export const searchUrl = track => `https://www.youtube.com/results?search_query=${encodeURIComponent(`${track.title} Odia song`)}`;
+export const spotifyUrl = track => isSpotifyId(track.spotifyId) ? `https://open.spotify.com/track/${track.spotifyId}` : null;
+export const appleMusicUrl = track => track.appleMusic || null;
+export const candidateUrl = track => track.candidateUrl || null;
+export const searchUrl = track => `https://open.spotify.com/search/${encodeURIComponent(`${track.title} ${track.artist || 'Odia'}`)}`;

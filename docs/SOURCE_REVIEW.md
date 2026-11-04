@@ -1,5 +1,9 @@
 # Source review — 4 November 2026
 
+> Historical YouTube review. The current player is audio-only Spotify. See
+> `AUDIO_SOURCE_RESEARCH.md` and `VERIFICATION.md` for replacement source matches
+> and actual preview playback checks. YouTube is no longer loaded by the site.
+
 The upgrade preserves the original twenty song entries and YouTube IDs from
 commit `c651fd72ceef6619e32a2565eae412729d3c33bb`.
 

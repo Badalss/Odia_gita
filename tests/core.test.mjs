@@ -1,18 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { tracks, artistLabel, isYoutubeId, searchUrl, youtubeUrl } from '../catalog.js';
+import { tracks, artistLabel, isYoutubeId, isSpotifyId, searchUrl, youtubeUrl, spotifyUrl, appleMusicUrl } from '../catalog.js';
+import { audioSources } from '../sources.js';
 import { PREFERENCE_KEY, clampVolume, createPreferenceStore, createQueue, defaultPreferences, filterTracks, formatTime, nextTrack, parseSelection, permanentLink, previousTrack, sanitizePreferences, selectQueue, setQueueShuffle, shouldIgnoreShortcut } from '../player-core.js';
 
 const ids = ['a', 'b', 'c', 'd'];
 
-test('catalogue preserves original order and every source stays unverified', () => {
+test('catalogue preserves original order and records matched provider pages separately from historical YouTube IDs', () => {
   assert.equal(tracks.length, 20);
   assert.equal(new Set(tracks.map(track => track.id)).size, 20);
   assert.equal(tracks[0].id, 'faguna-re-faguna');
   assert.equal(tracks[19].id, 'phulara-sahare-gharate-tolichi');
   for (const track of tracks) {
     assert.match(track.id, /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-    assert.equal(track.sourceStatus, 'unverified');
+    assert.equal(track.sourceStatus, audioSources[track.id]?.spotifyId ? 'matched' : audioSources[track.id]?.candidateUrl ? 'candidate' : 'unmatched');
     assert.equal(isYoutubeId(track.youtubeId), true);
     assert.match(youtubeUrl(track), /^https:\/\/www\.youtube\.com\/watch\?v=[\w-]{11}$/);
   }
@@ -23,6 +24,20 @@ test('catalogue preserves original order and every source stays unverified', () 
   assert.equal(isYoutubeId('abcdefghij!'), false);
   assert.equal(youtubeUrl({ youtubeId: 'bad' }), null);
   assert.ok(searchUrl({ title: '<script>& x' }).includes('%3Cscript%3E%26%20x'));
+  assert.equal(spotifyUrl(tracks[0]), 'https://open.spotify.com/track/4JFanZrSD5tDjDR2EKF7aq');
+  assert.equal(isSpotifyId('too-short'), false);
+  assert.equal(spotifyUrl({spotifyId: '<script>'}), null);
+  assert.equal(appleMusicUrl({}), null);
+  for (const source of Object.values(audioSources)) {
+    if (source.spotifyId) assert.equal(isSpotifyId(source.spotifyId), true);
+    assert.match(source.reference, /^https:\/\/(open\.spotify\.com|music\.apple\.com|www\.qobuz\.com)\//);
+    assert.ok(source.matchNote);
+  }
+  for (const track of tracks.filter(track => track.sourceStatus === 'candidate')) {
+    assert.equal(track.spotifyId, null, 'A possible recording must not become an automatic replacement');
+    assert.ok(track.candidateUrl);
+  }
+  assert.equal(tracks[1].spotifyId, '3fufhbcrcSxpkhj0SPF26j');
 });
 
 test('strict permanent and legacy query parsing rejects ambiguous and partial values', () => {

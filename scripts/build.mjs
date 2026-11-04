@@ -12,7 +12,7 @@ const inside = relative(root, target);
 if (!inside || inside.startsWith('..') || isAbsolute(inside)) throw new Error('Invalid build target.');
 await rm(target, { recursive: true, force: true });
 await mkdir(target, { recursive: true });
-for (const file of ['index.html', 'styles.css', 'script.js', 'catalog.js', 'player-core.js', '404.html', '.nojekyll']) {
+for (const file of ['index.html', 'styles.css', 'script.js', 'catalog.js', 'sources.js', 'player-core.js', '404.html', '.nojekyll']) {
   await cp(resolve(root, file), resolve(target, file));
 }
 await mkdir(resolve(target, 'assets'), { recursive: true });

@@ -1,7 +1,7 @@
 # Odia Love Memories
 
-A personal collection of twenty Odia songs. Plain HTML, CSS and JavaScript;
-no account, application server, runtime packages, database or paid service.
+A small Odia song collection with an **audio-only Spotify player**. Plain HTML,
+CSS and JavaScript; no runtime packages, server account or paid hosting service.
 
 ## Run locally
 
@@ -12,50 +12,54 @@ npm ci
 npm run dev
 ```
 
-Open http://127.0.0.1:4173. Use an HTTP server rather than opening `index.html`
-as a file: browser modules, storage and YouTube origin identification require it.
+Open http://127.0.0.1:4173. ES modules require an HTTP server, not a file URL.
 
-## Features
+## Listening
 
-- Visible YouTube video, loaded after an intentional Play or Load video action.
-- Selecting a distant song reveals its video; scrolling or switching tabs does not make the site pause it.
-- Search, favorites, recently played songs and readable source failure messages.
-- Repeat off/all/one, shuffled queue with listening history and restored mute volume.
-- Stable song links (`?track=jhum-jhum`); original `?song=2` links still resolve.
-- Browser-local preferences with a temporary fallback if storage is unavailable.
-- Responsive layout, keyboard help, native dialogs and reduced-motion support.
+- The YouTube video section and YouTube API have been removed.
+- Spotify loads only after an intentional song/player action.
+- The official compact embed is 80px high and at least 280px wide. Provider
+  controls remain visible. The supported compact layout uses audio when available.
+- The app provides previous/next, shuffle, favorites, recent listening and stable
+  song links. Spotify provides its own playback/progress controls.
+- No app pause is issued for scrolling or switching tabs. Background/locked-device
+  behavior still depends on Spotify, the browser and the operating system.
+- **A matched source does not guarantee a free full song.** Signed-out live tests
+  of Faguna Re Faguna and Jhum Jhum returned Spotify previews. Full tracks may
+  require sign-in/account entitlement and depend on region/browser support.
+- There is no automatic repeat/advance based on a preview cutoff. The documented
+  Spotify Embed API has no reliable track-ended event. Manual next/previous work.
+- No music is downloaded, extracted, proxied or rehosted by this repository.
 
-Favorites and history stay in this browser; there is no cross-device sync.
-Clearing preferences removes only this site's namespaced preference entry.
-YouTube provides video playback and may display ads or restrict availability.
-The site does not download or cache music or extract audio. It leaves playback
-to YouTube and the browser when you switch tabs or minimize the window, rather
-than adding its own visibility-based pauses. Background or locked-screen
-playback is not guaranteed: browser, operating-system and YouTube restrictions
-still apply. YouTube's embed policies do not support offering background play
-as a service feature: https://developers.google.com/youtube/terms/developer-policies-guide.
-YouTube is not requested until the visitor chooses to load/play a video; external
-listening links are available even when the embed fails.
+## Source status
 
-## Catalogue maintenance
+`sources.js` records seven matched Spotify catalogue entries, twelve clearly
+labelled candidate recording links, and one unresolved original (E Banara Chhai).
+Only confirmed title/known-artist matches are loaded into the player. Candidate
+recordings never silently replace an original song; their credited artists are
+shown when selected, and the visitor can inspect the official provider page.
 
-Edit `catalog.js`. Keep each permanent `id` unchanged after publication. Keep the
-original twenty entries in their original order because legacy numbered links
-use that order. New songs should be appended; update the displayed collection
-count and the intentional twenty-entry assertion in `scripts/build.mjs` when
-expanding the collection.
+See `docs/AUDIO_SOURCE_RESEARCH.md` for the twenty-song evidence table. Metadata
+matches were checked against official Spotify/Apple pages. Actual preview
+playback was separately tested for the two songs reported unavailable by the user.
+Other recordings and full-length playback remain unverified.
 
-Use only an actual 11-character YouTube video ID, or `null` when no source is
-known. Valid format does not mean the recording, credits, availability or
-embedding permission is verified. Unknown artist credits are `null` and display
-as "Artist unknown". Never guess a year, film or singer to fill a gap.
+For full-song native audio playback independent of Spotify, this project would
+need audio files or stable direct audio URLs authorized for that use. Provider
+page links do not grant rehosting rights. No such full-length sources are bundled.
 
-Optional `titleOdia` text is supported by search; add only reviewed spellings.
-Film/year filters are intentionally deferred until enough verified metadata is
-available. Source review status and current verification limits are documented
-in `docs/SOURCE_REVIEW.md`.
+## Maintenance
 
-## Verification
+`catalog.js` preserves the original twenty entries and immutable slug IDs. Keep
+that order for old `?song=2` links. New links use `?track=jhum-jhum`. Update
+`sources.js` after checking an official track page, including its singer/album.
+Do not promote an ambiguous same-title recording without confirming identity.
+The inherited YouTube IDs remain historical data only; they are not requested.
+
+Favorites/history remain in the visitor's browser with a safe temporary fallback
+when storage is unavailable. Clear preferences removes only this app's key.
+
+## Verification and build
 
 ```sh
 npm run check
@@ -63,11 +67,9 @@ npm test
 npm run build
 ```
 
-`npm run build` creates a dependency-free static release in `dist/`, excluding
-tests, original large PNGs, Python utilities and local artifacts.
-
-Browser tests use Python Playwright with a mocked YouTube API. Install the
-optional development tooling, then run:
+The static `dist/` release excludes tests, original large PNGs and local artifacts.
+The application modules and source registry are copied without a bundler.
+Browser tooling is optional and has no effect on the published website:
 
 ```sh
 python -m pip install -r requirements-dev.txt
@@ -78,33 +80,17 @@ python tests/browser_test.py --browser webkit
 python tests/browser_test.py --release
 ```
 
-The browser script starts its own localhost server and tests a `/Odia_gita/`
-mount, matching GitHub Pages project paths. It blocks third-party network
-requests and simulates player events. Screenshots and results go in gitignored
-`artifacts/`. Real playback must be checked separately; mocked tests cannot
-establish whether a video is correct, playable or available in another region.
-The `--release` option tests the built `dist/` files; run the build first.
-See `docs/VERIFICATION.md` for the executed checks and remaining manual checks.
+Tests start an isolated localhost server under the GitHub Pages `/Odia_gita/`
+subpath, mock Spotify responses and block other provider traffic. They do not
+prove full-track entitlement. See `docs/VERIFICATION.md` for actual checks.
 
-## Hosting and release
+## Release and rollback
 
-The existing public repository can use GitHub Pages at
-https://badalss.github.io/Odia_gita/ without an additional hosting service.
-GitHub's free-service limits still apply. No custom domain is needed.
+The source root and `dist/` remain static-site compatible with the existing
+GitHub Pages address https://badalss.github.io/Odia_gita/. No Pages/billing/domain
+settings are changed by this branch. Review before merging to the published
+branch. Reverting the upgrade commits restores the previous release.
 
-The source root remains directly deployable with the repository's existing Pages
-configuration. Before merging to the published branch, review the upgrade branch,
-test locally, and confirm all required song sources on the intended devices.
-Alternatively publish only the `dist/` artifact using a deliberate Pages workflow.
-This project does not add an automatic publishing workflow or change Pages settings.
-
-For rollback, revert the upgrade commit on the published branch and let the
-existing Pages build finish; keep song IDs stable through later releases.
-Browser-local data stays namespaced and is not uploaded.
-
-`ws_server.py` is a legacy, unused visitor-counter experiment. The website does
-not connect to it; it is excluded from the release. The inaccurate online count
-and its external counting request have been removed from the UI.
-
-The repository does not establish redistribution rights for the songs. Playback
-uses YouTube sources; adding a code license would not license the recordings.
+`ws_server.py` is an unused visitor-counter experiment and is excluded from the
+release. The site has no live listener counter or database. Existing artwork is
+retained with 94-95% smaller WebP versions. A code license would not license music.
