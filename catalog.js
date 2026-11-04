@@ -46,3 +46,5 @@ export const spotifyUrl = track => isSpotifyId(track.spotifyId) ? `https://open.
 export const appleMusicUrl = track => track.appleMusic || null;
 export const candidateUrl = track => track.candidateUrl || null;
 export const searchUrl = track => `https://open.spotify.com/search/${encodeURIComponent(`${track.title} ${track.artist || 'Odia'}`)}`;
+
+export const youtubeSearchUrl = track => `https://www.youtube.com/results?search_query=${encodeURIComponent(`${track.title} ${track.artist || 'Odia'}`)}`;

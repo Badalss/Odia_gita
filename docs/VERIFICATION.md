@@ -1,5 +1,9 @@
 # Audio-only verification — 4 November 2026
 
+> Historical Spotify implementation: the current branch now uses a hidden
+> YouTube iframe at the user's request. The following Spotify results describe
+> the prior implementation and should not be read as current player checks.
+
 Branch: `codex/odia-listening-upgrade`. The public branch, Pages settings and
 PurchaseShield working tree are unchanged.
 

@@ -1,6 +1,6 @@
 
-import { tracks, artistLabel, spotifyUrl, appleMusicUrl, candidateUrl, searchUrl } from './catalog.js';
-import { createPreferenceStore, createQueue, filterTracks, nextTrack, parseSelection, permanentLink, previousTrack, selectQueue, setQueueShuffle, shouldIgnoreShortcut } from './player-core.js';
+import { tracks, artistLabel, youtubeUrl, spotifyUrl, appleMusicUrl, youtubeSearchUrl as searchUrl } from './catalog.js';
+import { REPEAT_MODES, clampVolume, createPreferenceStore, createQueue, filterTracks, formatTime, nextTrack, parseSelection, permanentLink, previousTrack, selectQueue, setQueueShuffle, shouldIgnoreShortcut } from './player-core.js';
 
 const byId = id => document.getElementById(id);
 const ids = tracks.map(track => track.id);
@@ -15,11 +15,9 @@ let filter = 'all';
 let player = null;
 let playerReady = false;
 let playerState = 'idle';
-let loadedURI = null;
+let loadedVideoId = null;
 let playIntent = false;
-let pendingPlayRequest = false;
 let apiPromise = null;
-let spotifyApi = null;
 let apiScript = null;
 let startupTimer = null;
 let playbackTimer = null;
@@ -28,8 +26,9 @@ let statusDetail = '';
 let requesting = false;
 let initializationVersion = 0;
 let manualShareInvoker = null;
+const durations = new Map();
 const currentTrack = () => tracks.find(track => track.id === selectedId);
-const trackURI = () => currentTrack().spotifyId ? `spotify:track:${currentTrack().spotifyId}` : null;
+const validVideoEvent = event => event.target === player && loadedVideoId === currentTrack().youtubeId && player.getVideoData?.().video_id === loadedVideoId;
 
 function notify(message) {
   const toast = byId('toast');
@@ -56,26 +55,33 @@ function renderControls() {
   const track = currentTrack();
   const playing = playerState === 'playing';
   const messages = {
-    idle: 'Ready when you are. Spotify loads only when you choose to listen.',
-    loading: 'Loading Spotify audio…', ready: 'Spotify controls are ready. Press Play in the player to listen.',
-    playing: 'Playing audio on Spotify.', paused: 'Audio paused.', buffering: 'Buffering audio on Spotify…',
-    error: 'Spotify could not start audio. Retry or use an external listening link.',
-    no_source: 'No matched audio source yet. Try an external listening link.'
+    idle: 'Ready when you are. YouTube loads only when you choose to play.',
+    loading: 'Loading YouTube…', ready: 'Ready. Press Play to listen.', playing: 'Playing on YouTube.',
+    paused: 'Paused.', buffering: 'Buffering on YouTube…', ended: 'Queue finished. Choose a song or press Play.',
+    error: 'YouTube could not play this source. Retry or use an external link.'
   };
-  byId('availability').textContent = !track.spotifyId ? messages.no_source : statusDetail || messages[playerState];
-  byId('playButton').setAttribute('aria-label', playing || playerState === 'buffering' ? 'Pause' : playerReady ? 'Play' : 'Load and play audio');
-  byId('playButton').disabled = !track.spotifyId;
+  byId('availability').textContent = !track.youtubeId ? 'Unavailable here: the original source ID is incomplete. Search YouTube below.' : statusDetail || messages[playerState];
+  byId('playButton').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  byId('playButton').disabled = !track.youtubeId;
+  const glyph = byId('playButton').querySelector('.play-glyph');
+  if (glyph) glyph.textContent = playing ? 'Ⅱ' : '▶';
   byId('playButton').classList.toggle('is-playing', playing);
   byId('shuffleButton').setAttribute('aria-pressed', String(preferences.shuffle));
   byId('shuffleButton').classList.toggle('is-active', preferences.shuffle);
+  byId('repeatButton').setAttribute('aria-pressed', String(preferences.repeat !== 'none'));
+  byId('repeatButton').setAttribute('aria-label', `Repeat: ${preferences.repeat === 'none' ? 'off' : preferences.repeat}. Change repeat mode`);
+  byId('repeatButton').setAttribute('title', `Repeat ${preferences.repeat === 'none' ? 'off' : preferences.repeat}`);
+  byId('repeatButton').dataset.mode = preferences.repeat;
+  byId('repeatButton').classList.toggle('is-active', preferences.repeat !== 'none');
+  byId('volume').value = String(preferences.volume);
+  byId('volumeButton').setAttribute('aria-label', preferences.volume === 0 ? 'Unmute' : 'Mute');
+  byId('volumeButton').setAttribute('aria-pressed', String(preferences.volume === 0));
   byId('currentFavorite').setAttribute('aria-pressed', String(preferences.favorites.includes(selectedId)));
   byId('currentFavorite').setAttribute('aria-label', preferences.favorites.includes(selectedId) ? 'Remove current song from favorites' : 'Favorite current song');
-  byId('retryButton').hidden = playerState !== 'error' || !track.spotifyId;
-  byId('loadAudioButton').hidden = playerReady || playerState === 'loading';
-  byId('loadAudioButton').disabled = !track.spotifyId;
-  byId('playerHint').textContent = !track.spotifyId
-    ? track.candidateLabel ? `Possible recording: ${track.candidateLabel}. Open the possible match below to check it.` : 'No Spotify track has been matched for this song. Search by title and artist below.'
-    : 'Use Spotify’s own playback controls. Full tracks, previews and availability depend on Spotify, your account and region.';
+  byId('retryButton').hidden = playerState !== 'error' || !track.youtubeId;
+  byId('loadPlayerButton').hidden = playerReady || playerState === 'loading';
+  byId('loadPlayerButton').disabled = !track.youtubeId;
+  byId('seek').disabled = !playerReady || !Number.isFinite(durations.get(selectedId));
 }
 
 function sourceLink(label, href) {
@@ -91,12 +97,11 @@ function sourceLink(label, href) {
 function renderSources() {
   const track = currentTrack();
   const fragment = document.createDocumentFragment();
-  const url = spotifyUrl(track);
-  const appleUrl = appleMusicUrl(track);
-  if (url) fragment.append(sourceLink('Open on Spotify ↗', url));
-  if (appleUrl) fragment.append(sourceLink('Open on Apple Music ↗', appleUrl));
-  if (candidateUrl(track)) fragment.append(sourceLink('Possible match ↗', candidateUrl(track)));
-  fragment.append(sourceLink('Search Spotify ↗', searchUrl(track)));
+  const url = youtubeUrl(track);
+  if (url) fragment.append(sourceLink('Open on YouTube ↗', url));
+  if (spotifyUrl(track)) fragment.append(sourceLink('Open on Spotify ↗', spotifyUrl(track)));
+  if (appleMusicUrl(track)) fragment.append(sourceLink('Open on Apple Music ↗', appleMusicUrl(track)));
+  fragment.append(sourceLink('Search YouTube ↗', searchUrl(track)));
   byId('externalSources').replaceChildren(fragment);
 }
 
@@ -124,7 +129,7 @@ function renderPlaylist() {
     select.dataset.track = track.id;
     select.dataset.action = 'select';
     if (track.id === selectedId) select.setAttribute('aria-current', 'true');
-    select.setAttribute('aria-label', `Play ${track.title}${track.spotifyId ? '' : ' (no matched audio source)'}`);
+    select.setAttribute('aria-label', `Play ${track.title}${track.youtubeId ? '' : ' (source unavailable)'}`);
     const index = document.createElement('span');
     index.className = 'song-index';
     index.textContent = String(tracks.indexOf(track) + 1).padStart(2, '0');
@@ -135,7 +140,7 @@ function renderPlaylist() {
     title.textContent = track.title;
     const meta = document.createElement('span');
     meta.className = 'song-meta';
-    meta.textContent = `${artistLabel(track)} · ${track.spotifyId ? 'Spotify audio' : track.candidateUrl ? 'Possible recording found' : 'No matched audio source yet'}`;
+    meta.textContent = `${artistLabel(track)} · ${track.youtubeId ? 'Unverified source' : 'Source unavailable'}`;
     details.append(title, meta);
     select.append(index, details);
     select.addEventListener('click', () => selectTrack(track.id, true));
@@ -184,69 +189,51 @@ function renderSelection() {
   byId('trackTitleText').textContent = track.title;
   byId('trackArtist').textContent = artistLabel(track);
   byId('trackNumber').textContent = String(ids.indexOf(track.id) + 1).padStart(2, '0');
+  byId('elapsed').textContent = '0:00';
+  byId('duration').textContent = formatTime(durations.get(selectedId));
+  byId('seek').value = '0';
   renderSources();
   renderControls();
   renderPlaylist();
 }
 
-function resetPlayer() {
-  initializationVersion += 1;
+function fail(message) {
   clearTimeout(startupTimer);
   clearTimeout(playbackTimer);
-  requesting = false;
-  pendingPlayRequest = false;
-  playerReady = false;
-  loadedURI = null;
-  const oldPlayer = player;
-  player = null;
-  try { oldPlayer?.pause(); } catch { /* A detached provider may already be closed. */ }
-  try { oldPlayer?.destroy(); } catch { /* Remove the detached host below. */ }
-  byId('audioPlayerFrame').querySelectorAll('iframe, #spotifyPlayer').forEach(element => element.remove());
-  const host = document.createElement('div');
-  host.id = 'spotifyPlayer';
-  byId('audioPlayerFrame').append(host);
-  byId('audioPlaceholder').hidden = false;
-}
-
-function fail(message) {
   playIntent = false;
-  resetPlayer();
+  requesting = false;
+  initializationVersion += 1;
   setStatus('error', message);
+  if (playerReady) player.pauseVideo();
 }
 
-function loadSpotifyApi() {
-  if (spotifyApi) return Promise.resolve(spotifyApi);
+function revealVideo() {
+  // Intentional controls bring the actual video into view before starting it.
+  byId('videoFrame').scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' });
+}
+
+function loadYoutubeApi() {
+  if (window.YT?.Player) return Promise.resolve();
   if (apiPromise) return apiPromise;
   apiPromise = new Promise((resolve, reject) => {
+    const previous = window.onYouTubeIframeAPIReady;
     let settled = false;
-    const previous = window.onSpotifyIframeApiReady;
-    const finish = (api, error) => {
+    const finish = error => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (error) {
-        apiPromise = null;
-        apiScript?.remove();
-        apiScript = null;
-        reject(error);
-      } else {
-        spotifyApi = api;
-        resolve(api);
-      }
+      if (error) { apiPromise = null; apiScript?.remove(); apiScript = null; reject(error); }
+      else resolve();
     };
-    window.onSpotifyIframeApiReady = api => {
-      // A timed-out script can still complete; cache it for a later explicit retry.
-      if (api?.createController) spotifyApi = api;
-      if (typeof previous === 'function') {
-        try { previous(api); } catch { /* Other embeds cannot break this player. */ }
-      }
-      api?.createController ? finish(api) : finish(null, new Error('Spotify audio API is unavailable.'));
+    window.onYouTubeIframeAPIReady = () => {
+      if (typeof previous === 'function') previous();
+      window.YT?.Player ? finish() : finish(new Error('YouTube API unavailable'));
     };
-    const timer = setTimeout(() => finish(null, new Error('Spotify took too long to load. Retry or use an external listening link.')), 15000);
+    const timer = setTimeout(() => finish(new Error('YouTube took too long to load. Check your connection, then retry.')), 15000);
     apiScript = document.createElement('script');
-    apiScript.src = 'https://open.spotify.com/embed/iframe-api/v1';
+    apiScript.src = 'https://www.youtube.com/iframe_api';
     apiScript.async = true;
-    apiScript.onerror = () => finish(null, new Error('Spotify could not load. Check your connection, then retry.'));
+    apiScript.onerror = () => finish(new Error('YouTube could not load. Check your connection, then retry.'));
     document.head.append(apiScript);
   });
   return apiPromise;
@@ -254,29 +241,27 @@ function loadSpotifyApi() {
 
 function armPlaybackTimeout() {
   clearTimeout(playbackTimer);
-  const attempt = initializationVersion;
   playbackTimer = setTimeout(() => {
-    if (attempt === initializationVersion && playIntent && playerState !== 'playing') {
-      fail('Audio did not start. Retry to reload Spotify’s controls, or use an external listening link.');
-    }
-  }, 15000);
+    if (playIntent && ['loading', 'buffering'].includes(playerState)) fail('Playback did not start. Press Retry or open this song on YouTube.');
+  }, 18000);
 }
 
-function requestPlayback() {
-  if (!playerReady || !player || loadedURI !== trackURI()) return;
-  playIntent = true;
-  pendingPlayRequest = true;
-  setStatus('loading', 'Starting audio… Spotify may require you to press Play in its player.');
+function playCurrent() {
+  if (!playerReady || !player || !playIntent) return;
+  const videoId = currentTrack().youtubeId;
+  if (!videoId) { player.stopVideo(); loadedVideoId = null; setStatus('idle'); return; }
+  loadedVideoId = videoId;
+  setStatus('loading', 'Starting the selected song…');
   armPlaybackTimeout();
-  try { player.resume(); }
-  catch { fail('Spotify could not start audio. Retry or use an external listening link.'); }
+  if (player.getVideoData?.().video_id === videoId && player.getPlayerState?.() !== 0) player.playVideo();
+  else player.loadVideoById(videoId);
 }
 
 async function ensurePlayer(shouldPlay) {
-  if (!trackURI()) return;
+  if (!currentTrack().youtubeId) return;
   playIntent = shouldPlay;
-  if (playerReady && loadedURI === trackURI()) {
-    if (shouldPlay) requestPlayback();
+  if (playerReady) {
+    if (shouldPlay) playCurrent();
     return;
   }
   if (requesting) return;
@@ -284,97 +269,117 @@ async function ensurePlayer(shouldPlay) {
   const attempt = ++initializationVersion;
   setStatus('loading');
   try {
-    const api = await loadSpotifyApi();
-    if (attempt !== initializationVersion || !requesting || !trackURI()) return;
-    const uri = trackURI();
-    loadedURI = uri;
-    startupTimer = setTimeout(() => {
-      if (attempt === initializationVersion) fail('The Spotify audio player did not become ready. Retry or use an external listening link.');
-    }, 15000);
-    // Spotify documents audio fallback below 150px. Keep the complete compact player visible.
-    api.createController(byId('spotifyPlayer'), { uri, width: '100%', height: 80 }, controller => {
-      if (attempt !== initializationVersion || uri !== trackURI()) {
-        try { controller.destroy(); } catch { /* A stale initialization is discarded. */ }
-        return;
-      }
-      player = controller;
-      const valid = event => attempt === initializationVersion && player === controller && loadedURI === trackURI()
-        && event?.data?.playingURI === loadedURI;
-      controller.addListener('ready', () => {
-        if (attempt !== initializationVersion || player !== controller || uri !== trackURI()) return;
-        clearTimeout(startupTimer);
-        requesting = false;
-        playerReady = true;
-        byId('audioPlaceholder').hidden = true;
-        const iframe = byId('audioPlayerFrame').querySelector('iframe');
-        if (iframe) {
-          iframe.title = `Spotify audio player: ${currentTrack().title}`;
-          iframe.height = '80';
-          iframe.style.height = '80px';
+    await loadYoutubeApi();
+    if (!requesting || attempt !== initializationVersion) return;
+    // Always read the latest selection and intent in onReady.
+    startupTimer = setTimeout(() => fail('The YouTube player did not become ready. Press Retry or use an external link.'), 15000);
+    // Once an iframe exists, no app artwork or controls cover its own controls.
+    byId('videoPlaceholder').hidden = true;
+    player = new window.YT.Player('youtubePlayer', {
+      width: '100%', height: '100%',
+      playerVars: { autoplay: 0, controls: 1, playsinline: 1, rel: 0, ...(window.location.protocol.startsWith('http') ? { origin: window.location.origin } : {}) },
+      events: {
+        onReady(event) {
+          if (event.target !== player || attempt !== initializationVersion) return;
+          clearTimeout(startupTimer);
+          requesting = false;
+          playerReady = true;
+          player.setVolume(preferences.volume);
+          byId('videoPlaceholder').hidden = true;
+          const iframe = player.getIframe();
+          iframe.title = 'YouTube video player';
           iframe.setAttribute('tabindex', '0');
-        }
-        setStatus('ready');
-        if (playIntent) requestPlayback();
-      });
-      controller.addListener('playback_started', event => {
-        if (!valid(event)) return;
-        clearTimeout(playbackTimer);
-        pendingPlayRequest = false;
-        playIntent = true;
-        setStatus('playing');
-        preferences.recent = [selectedId, ...preferences.recent.filter(id => id !== selectedId)].slice(0, ids.length);
-        savePreferences();
-        renderPlaylist();
-      });
-      controller.addListener('playback_update', event => {
-        if (!valid(event)) return;
-        const data = event.data;
-        if (data.isBuffering) {
-          const wasBuffering = playerState === 'buffering';
-          playIntent = true;
-          setStatus('buffering');
-          if (!wasBuffering) armPlaybackTimeout();
-        } else if (data.isPaused === true) {
-          // A paused initialization can precede a browser-blocked play request.
-          if (!pendingPlayRequest) { playIntent = false; clearTimeout(playbackTimer); }
-          setStatus(pendingPlayRequest ? 'ready' : 'paused', pendingPlayRequest ? 'Press Play in Spotify’s player to start audio.' : '');
-        } else if (data.isPaused === false) {
+          if (playIntent) playCurrent();
+          else {
+            playIntent = false;
+            const pausedDetail = playerState === 'paused' ? statusDetail : '';
+            loadedVideoId = currentTrack().youtubeId;
+            if (loadedVideoId) player.cueVideoById(loadedVideoId);
+            setStatus(pausedDetail ? 'paused' : 'ready', pausedDetail);
+          }
+        },
+        onStateChange(event) {
+          if (!validVideoEvent(event)) return;
+          // The iframe may deliver queued events after a newer load request.
+          if (typeof player.getPlayerState === 'function' && player.getPlayerState() !== event.data) return;
+          const states = window.YT.PlayerState;
+          if (playerState === 'error') {
+            if (event.data === states.PLAYING || event.data === states.BUFFERING) player.pauseVideo();
+            return;
+          }
+          if (event.data === states.PLAYING) {
+            clearTimeout(playbackTimer);
+            playIntent = true;
+            setStatus('playing');
+            preferences.recent = [selectedId, ...preferences.recent.filter(id => id !== selectedId)].slice(0, ids.length);
+            savePreferences();
+            const total = player.getDuration();
+            if (Number.isFinite(total) && total > 0) durations.set(selectedId, total);
+            renderPlaylist();
+            updateProgress();
+          } else if (event.data === states.PAUSED) {
+            clearTimeout(playbackTimer);
+            playIntent = false;
+            setStatus('paused', playerState === 'paused' ? statusDetail : '');
+          } else if (event.data === states.BUFFERING) {
+            setStatus('buffering');
+            armPlaybackTimeout();
+          } else if (event.data === states.CUED) {
+            if (!playIntent && playerState !== 'paused') setStatus('ready');
+          } else if (event.data === states.ENDED) {
+            clearTimeout(playbackTimer);
+            playIntent = false;
+            advance(true);
+          }
+        },
+        onError(event) {
+          if (event.target !== player || loadedVideoId !== currentTrack().youtubeId) return;
+          const observed = player.getVideoData?.().video_id;
+          if (observed && observed !== loadedVideoId) return;
+          fail('This source is unavailable, restricted, or cannot be embedded. Retry or open it on YouTube.');
+        },
+        onAutoplayBlocked() {
+          if (playerState === 'error') return;
           clearTimeout(playbackTimer);
-          pendingPlayRequest = false;
-          playIntent = true;
-          setStatus('playing');
+          playIntent = false;
+          setStatus('ready', 'Your browser blocked playback. Press Play again or use the video controls.');
         }
-        // No documented end event: a preview cutoff must never advance or repeat the queue.
-      });
+      }
     });
   } catch (error) {
-    if (attempt === initializationVersion) fail(error instanceof Error ? error.message : 'Spotify failed to load. Please retry.');
+    if (attempt === initializationVersion) fail(error instanceof Error ? error.message : 'YouTube failed to load. Please retry.');
   }
 }
 
-function selectTrack(id, shouldPlay = false, updateQueue = true) {
+function selectTrack(id, shouldPlay = false, updateQueue = true, reveal = true) {
   if (!ids.includes(id)) return;
-  resetPlayer();
   selectedId = id;
   if (updateQueue) queue = selectQueue(queue, id);
   preferences.lastSelected = id;
   savePreferences();
   playIntent = shouldPlay;
-  setStatus(trackURI() ? 'idle' : 'no_source');
+  clearTimeout(playbackTimer);
+  loadedVideoId = null;
+  if (playerReady) player.stopVideo();
+  setStatus('idle');
   renderSelection();
-  try { window.history.replaceState(null, '', permanentLink(window.location.href, id)); } catch { /* Privacy contexts may restrict history. */ }
-  if (trackURI() && shouldPlay) void ensurePlayer(true);
-  else if (!trackURI()) {
+  try { window.history.replaceState(null, '', permanentLink(window.location.href, id)); } catch { /* Local-file/privacy contexts may restrict history. */ }
+  if (currentTrack().youtubeId) {
+    if (shouldPlay) {
+      if (reveal) revealVideo();
+      void ensurePlayer(true);
+    }
+  } else {
     playIntent = false;
-    notify('No matched audio source yet. Use an external listening link or search Spotify.');
+    notify('This source ID is incomplete. Use Search YouTube to find the song.');
   }
 }
 
-function advance() {
-  const result = nextTrack(queue, { repeat: 'none', auto: false });
+function advance(auto = false) {
+  const result = nextTrack(queue, { repeat: preferences.repeat, auto });
   queue = result.queue;
-  if (!result.id) { notify('You are at the end of the queue. Choose another song.'); return; }
-  selectTrack(result.id, true, false);
+  if (!result.id) { playIntent = false; setStatus('ended'); return; }
+  selectTrack(result.id, true, false, !auto);
 }
 
 function goPrevious() {
@@ -385,14 +390,30 @@ function goPrevious() {
 }
 
 function togglePlayback() {
-  if (!trackURI()) return;
-  if (playerReady && ['playing', 'buffering'].includes(playerState)) {
-    playIntent = false;
-    pendingPlayRequest = false;
-    clearTimeout(playbackTimer);
-    try { player.pause(); }
-    catch { fail('Spotify could not pause audio. Retry or use an external listening link.'); }
-  } else void ensurePlayer(true);
+  if (!currentTrack().youtubeId) return;
+  if (playerReady && playerState === 'playing') { playIntent = false; player.pauseVideo(); }
+  else { revealVideo(); void ensurePlayer(true); }
+}
+
+function updateProgress() {
+  if (!playerReady || loadedVideoId !== currentTrack().youtubeId || player.getVideoData?.().video_id !== loadedVideoId) return;
+  const current = player.getCurrentTime();
+  const total = player.getDuration();
+  if (!Number.isFinite(total) || total <= 0) return;
+  durations.set(selectedId, total);
+  byId('elapsed').textContent = formatTime(current);
+  byId('duration').textContent = formatTime(total);
+  byId('seek').disabled = false;
+  if (document.activeElement !== byId('seek')) byId('seek').value = String(Math.min(100, Math.max(0, current / total * 100)));
+  byId('seek').setAttribute('aria-valuetext', `${formatTime(current)} of ${formatTime(total)}`);
+}
+
+function setVolume(value) {
+  preferences.volume = clampVolume(value);
+  if (preferences.volume > 0) preferences.lastVolume = preferences.volume;
+  if (playerReady) { player.unMute(); player.setVolume(preferences.volume); }
+  savePreferences();
+  renderControls();
 }
 
 function toggleShuffle() {
@@ -400,9 +421,15 @@ function toggleShuffle() {
   queue = setQueueShuffle(queue, preferences.shuffle);
   savePreferences();
   renderControls();
-  notify(preferences.shuffle ? 'Shuffle on. Next chooses an unvisited song.' : 'Shuffle off.');
+  notify(preferences.shuffle ? 'Shuffle on. Each song plays once per queue.' : 'Shuffle off.');
 }
 
+function cycleRepeat() {
+  preferences.repeat = REPEAT_MODES[(REPEAT_MODES.indexOf(preferences.repeat) + 1) % REPEAT_MODES.length];
+  savePreferences();
+  renderControls();
+  notify(`Repeat ${preferences.repeat === 'none' ? 'off' : preferences.repeat}.`);
+}
 
 function showManualShare(url, invoker) {
   const dialog = byId('manualShareDialog');
@@ -426,14 +453,26 @@ async function shareTrack(track, invoker) {
 }
 
 byId('playButton').addEventListener('click', togglePlayback);
-byId('loadAudioButton').addEventListener('click', () => { void ensurePlayer(false); });
+byId('loadPlayerButton').addEventListener('click', () => { revealVideo(); void ensurePlayer(false); });
 byId('retryButton').addEventListener('click', () => {
-  resetPlayer();
+  clearTimeout(startupTimer);
+  clearTimeout(playbackTimer);
+  if (player && !playerReady) {
+    player.destroy?.(); player = null;
+    if (!byId('youtubePlayer')) {
+      const host = document.createElement('div'); host.id = 'youtubePlayer'; byId('videoFrame').append(host);
+    }
+  }
+  requesting = false;
+  revealVideo();
   void ensurePlayer(true);
 });
 byId('previousButton').addEventListener('click', goPrevious);
 byId('nextButton').addEventListener('click', () => advance());
 byId('shuffleButton').addEventListener('click', toggleShuffle);
+byId('repeatButton').addEventListener('click', cycleRepeat);
+byId('volume').addEventListener('input', event => setVolume(Number(event.target.value)));
+byId('volumeButton').addEventListener('click', () => setVolume(preferences.volume > 0 ? 0 : preferences.lastVolume));
 byId('currentFavorite').addEventListener('click', () => favorite(selectedId));
 byId('shareButton').addEventListener('click', event => shareTrack(currentTrack(), event.currentTarget));
 byId('playlistSearch').addEventListener('input', renderPlaylist);
@@ -448,7 +487,17 @@ byId('clearPreferences').addEventListener('click', () => {
   filter = 'all';
   byId('playlistSearch').value = '';
   byId('preferenceStatus').textContent = snapshot.message;
+  if (playerReady) { player.unMute(); player.setVolume(preferences.volume); }
   renderControls(); renderPlaylist(); notify('Preferences reset.');
+});
+byId('seek').addEventListener('input', event => {
+  if (!playerReady || loadedVideoId !== currentTrack().youtubeId) return;
+  const total = player.getDuration();
+  const value = Number(event.target.value);
+  if (Number.isFinite(total) && total > 0 && Number.isFinite(value)) {
+    player.seekTo(Math.min(100, Math.max(0, value)) / 100 * total, true);
+    byId('elapsed').textContent = formatTime(value / 100 * total);
+  }
 });
 const shortcutsDialog = byId('shortcutsDialog');
 function openShortcuts() {
@@ -473,14 +522,15 @@ document.addEventListener('keydown', event => {
   else if (event.key === 'ArrowRight' && event.ctrlKey) action = () => advance();
   else if (event.key === 'ArrowLeft' && event.ctrlKey) action = goPrevious;
   else if (event.key.toLowerCase() === 's' && !event.ctrlKey) action = toggleShuffle;
+  else if (event.key.toLowerCase() === 'r' && !event.ctrlKey) action = cycleRepeat;
   else if (event.key === '?' && !event.ctrlKey) action = openShortcuts;
   if (action) { event.preventDefault(); action(); }
 });
 window.addEventListener('offline', () => {
-  if (['playing', 'loading', 'buffering'].includes(playerState)) fail('You are offline. Reconnect, then press Retry or use an external listening link.');
+  if (['playing', 'loading', 'buffering'].includes(playerState)) { if (playerReady) player.pauseVideo(); fail('You are offline. Reconnect, then press Retry or use an external link.'); }
 });
 byId('preferenceStatus').textContent = store.read().message;
 if (byId('catalogCount')) byId('catalogCount').textContent = String(tracks.length);
-if (!trackURI()) setStatus('no_source');
 renderSelection();
 if (linkSelection.error) notify(linkSelection.error);
+setInterval(updateProgress, 500);
