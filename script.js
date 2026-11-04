@@ -1,5 +1,5 @@
 
-import { tracks, artistLabel, youtubeUrl, spotifyUrl, appleMusicUrl, youtubeSearchUrl as searchUrl } from './catalog.js';
+import { tracks, artistLabel, youtubeUrl, spotifyUrl, appleMusicUrl, candidateUrl, youtubeSearchUrl as searchUrl } from './catalog.js';
 import { REPEAT_MODES, clampVolume, createPreferenceStore, createQueue, filterTracks, formatTime, nextTrack, parseSelection, permanentLink, previousTrack, selectQueue, setQueueShuffle, shouldIgnoreShortcut } from './player-core.js';
 
 const byId = id => document.getElementById(id);
@@ -101,6 +101,7 @@ function renderSources() {
   if (url) fragment.append(sourceLink('Open on YouTube ↗', url));
   if (spotifyUrl(track)) fragment.append(sourceLink('Open on Spotify ↗', spotifyUrl(track)));
   if (appleMusicUrl(track)) fragment.append(sourceLink('Open on Apple Music ↗', appleMusicUrl(track)));
+  if (candidateUrl(track)) fragment.append(sourceLink(`Possible match: ${track.candidateLabel} ↗`, candidateUrl(track)));
   fragment.append(sourceLink('Search YouTube ↗', searchUrl(track)));
   byId('externalSources').replaceChildren(fragment);
 }
@@ -336,7 +337,15 @@ async function ensurePlayer(shouldPlay) {
           if (event.target !== player || loadedVideoId !== currentTrack().youtubeId) return;
           const observed = player.getVideoData?.().video_id;
           if (observed && observed !== loadedVideoId) return;
-          fail('This source is unavailable, restricted, or cannot be embedded. Retry or open it on YouTube.');
+          const errors = {
+            2: 'YouTube rejected this song link (error 2). Open it on YouTube or search for another recording.',
+            5: 'The browser or YouTube could not play this video (error 5). Try another browser or open it on YouTube.',
+            100: 'This YouTube video is unavailable or private (error 100). Search for another recording.',
+            101: 'The uploader does not allow this video to play on other websites (error 101). Open it on YouTube.',
+            150: 'The uploader does not allow this video to play on other websites (error 150). Open it on YouTube.',
+            153: 'YouTube could not identify this website (error 153). Try the published site or open the song on YouTube.'
+          };
+          fail(errors[event.data] || `YouTube playback failed (error ${Number.isInteger(event.data) ? event.data : 'unknown'}). Open the song on YouTube or try another source.`);
         },
         onAutoplayBlocked() {
           if (playerState === 'error') return;

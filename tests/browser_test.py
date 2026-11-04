@@ -201,7 +201,12 @@ def run(browser_name, release=False):
         expect(page.locator('#availability')).to_contain_text('buffer',ignore_case=True)
         page.evaluate('window.__yt.error(150)')
         expect(page.locator('#retryButton')).to_be_visible()
+        expect(page.locator('#availability')).to_contain_text('uploader does not allow')
         expect(page.locator('#externalSources a').first).to_be_visible()
+        page.locator('#retryButton').click()
+        page.wait_for_function('window.__yt.state === 1')
+        page.evaluate('window.__yt.error(153)')
+        expect(page.locator('#availability')).to_contain_text('could not identify this website')
         page.locator('#retryButton').click()
         page.wait_for_function('window.__yt.state === 1')
         checks.append('Buffering, embedding failure, external fallback and recovery')
@@ -241,6 +246,15 @@ def run(browser_name, release=False):
         assert not errors, errors
         context.close()
         checks.append('Malformed URL rejected and latest selection wins while API is loading')
+
+        context, page, external, errors = open_page('?track=basinda')
+        possible = page.locator('#externalSources a').filter(has_text='Possible match')
+        expect(possible).to_have_count(1)
+        assert possible.get_attribute('href') == 'https://open.spotify.com/track/45zBv5q7RZRA7DalGbuHSZ'
+        assert 'Charidham' not in page.locator('#trackTitleText').inner_text()
+        assert not errors, errors
+        context.close()
+        checks.append('Ambiguous recordings are offered as labelled links without substituting the selected song')
 
         context, page, external, errors = open_page(delayed=True)
         page.locator('#playButton').click()

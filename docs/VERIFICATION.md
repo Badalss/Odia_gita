@@ -1,5 +1,13 @@
 # Audio-only verification — 4 November 2026
 
+> Follow-up player diagnosis: in the user's in-app browser, Faguna Re Faguna,
+> Jhum Jhum, and Basinda each produced YouTube error 150. YouTube documents this
+> as the uploader prohibiting embedding. The app now distinguishes this from
+> invalid IDs, deleted videos, HTML5 failures and error 153. The observed
+> Phulara Sahare source reported 46:31, consistent with the source listing it
+> as the first track of a compilation; it has not been confirmed as a standalone
+> song. These checks do not establish the status of the other songs.
+
 > Historical Spotify implementation: the current branch now uses a hidden
 > YouTube iframe at the user's request. The following Spotify results describe
 > the prior implementation and should not be read as current player checks.
