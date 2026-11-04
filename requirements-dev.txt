@@ -1,0 +1,2 @@
+# Optional browser regression tooling only; the published website has no dependencies.
+playwright==1.63.0

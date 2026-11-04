@@ -1,533 +1,545 @@
-const track = (title, artist, sources = {}) => ({
-  title,
-  artist,
-  youtubeId: sources.youtubeId || '',
-  youtubeUrl: sources.youtubeUrl || '',
-  spotifyUrl: sources.spotifyUrl || '',
-  youtubeMusicUrl: sources.youtubeMusicUrl || ''
-});
 
-const tracks = [
-  track('Faguna Re Faguna', 'Babul Supriyo, Ira Mohanty', { youtubeId: 'OiJmJQefcu4' }),
-  track('Jhum Jhum', 'Kabita Krishnamurthy, Prosan Jeet', { youtubeId: '5cXf1t57NqE' }),
-  track('Sunara Chadheyi', 'Sonu Nigam, Kabita', { youtubeId: 'U46qaVIN5JU' }),
-  track('Gori Jhumuru Jhumuru Tora Pada Paunji', 'Sonu Nigam', { youtubeId: '4towad-Ntvc' }),
-  track('To Akhi Mo Aaina', 'Sonu Nigam / Pamela Jain', { youtubeId: '5LIC20f47Q0' }),
-  track('Anamika Nayika Se Hela Mora Premika', 'Babul Supriyo', { youtubeId: 'U1qJfUyw31s' }),
-  track('Sata Meghara Odhani', 'Odia romantic collection', { youtubeId: 'H86ELoqwrFM' }),
-  track('Pritira Pahili Chitti', 'Odia romantic collection', { youtubeId: 'rXcbn53xPfM' }),
-  track('Ajana Bate', 'Odia romantic collection', { youtubeId: 'B6HFhvXuxr0' }),
-  track('Gabhare Gajara Jhulei', 'Odia romantic collection', { youtubeId: 'jSVH_nCbagY' }),
-  track('Rupasi Mananku Namaste', 'Odia romantic collection', { youtubeId: 'oXnDXztLsmI' }),
-  track('Janhare Tate', 'Udit Narayan', { youtubeId: 'tuw-QB2Ud7k' }),
-  track('E Banara Chhai', 'Amit Kumar', { youtubeId: 'IeHoRrhbZnc' }),
-  track('Tume Mo Phula Mu Tuma Phaguna', 'Odia romantic collection', { youtubeId: 'f7KAg85gnTE' }),
-  track('Chandrama Ago Chandrama', 'Odia romantic collection', { youtubeId: 'Ce05KxJDkcU' }),
-  track('Chhati Tale', 'Odia romantic collection', { youtubeId: '0z6AifAOSVk' }),
-  track('Hela Ki Prema', 'Odia romantic collection', { youtubeId: 'x3rECnmVa5M' }),
-  track('Matha Re Dei Pata Odhani', 'Odia romantic collection', { youtubeId: 'Y7de3k4q0bw' }),
-  track('Basinda', 'Odia romantic collection', { youtubeId: 'RFq8_xfM5qg' }),
-  track('Phulara Sahare Gharate Tolichi', 'Odia romantic collection', { youtubeId: 'jpDI0TEvxLA' })
-];
+import { tracks, artistLabel, youtubeUrl, spotifyUrl, appleMusicUrl, candidateUrl, youtubeSearchUrl as searchUrl } from './catalog.js';
+import { REPEAT_MODES, clampVolume, createPreferenceStore, createQueue, filterTracks, formatTime, nextTrack, parseSelection, permanentLink, previousTrack, selectQueue, setQueueShuffle, shouldIgnoreShortcut } from './player-core.js';
 
-// Track durations (fetched from YouTube API or fallback)
-const trackDurations = {};
+const byId = id => document.getElementById(id);
+const ids = tracks.map(track => track.id);
+let browserStorage = null;
+try { browserStorage = window.localStorage; } catch { /* Privacy settings can block the getter. */ }
+const store = createPreferenceStore(browserStorage, ids);
+let preferences = store.read().preferences;
+const linkSelection = parseSelection(window.location.search, tracks);
+let selectedId = linkSelection.id || preferences.lastSelected || ids[0];
+let queue = createQueue(ids, selectedId, preferences.shuffle);
+let filter = 'all';
+let player = null;
+let playerReady = false;
+let playerState = 'idle';
+let loadedVideoId = null;
+let playIntent = false;
+let apiPromise = null;
+let apiScript = null;
+let startupTimer = null;
+let playbackTimer = null;
+let toastTimer = null;
+let statusDetail = '';
+let requesting = false;
+let initializationVersion = 0;
+let manualShareInvoker = null;
+const durations = new Map();
+const currentTrack = () => tracks.find(track => track.id === selectedId);
+const validVideoEvent = event => event.target === player && loadedVideoId === currentTrack().youtubeId && player.getVideoData?.().video_id === loadedVideoId;
 
-const state = {
-  currentIndex: 0,
-  player: null,
-  playerReady: false,
-  loadedVideoId: '',
-  isPlaying: false,
-  toastTimer: null,
-  sourceError: false,
-  shuffle: false,
-  repeat: 'none', // none, one, all
-  volume: 100,
-  searchQuery: ''
-};
-
-const $ = (selector) => document.querySelector(selector);
-const clock = $('#clock');
-const onlineCount = $('#onlineCount');
-const trackNumber = $('#trackNumber');
-const trackTitleText = $('#trackTitleText');
-const trackArtist = $('#trackArtist');
-const availability = $('#availability');
-const elapsed = $('#elapsed');
-const duration = $('#duration');
-const seek = $('#seek');
-const seekTooltip = $('#seekTooltip');
-const playButton = $('#playButton');
-const playGlyph = $('.play-glyph');
-const playlistPanel = $('#playlistPanel');
-const playlistList = $('#playlistList');
-const playlistToggle = $('#playlistToggle');
-const queueButton = $('#queueButton');
-const externalSources = $('#externalSources');
-const toast = $('#toast');
-const shuffleButton = $('#shuffleButton');
-const repeatButton = $('#repeatButton');
-const volumeButton = $('#volumeButton');
-const volumeSlider = $('#volume');
-const playlistSearch = $('#playlistSearch');
-const shortcutsToggle = $('#shortcutsToggle');
-const shortcutsOverlay = $('#shortcutsOverlay');
-const shortcutsClose = $('#shortcutsClose');
-
-function updateClock() {
-  clock.textContent = new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(new Date()).toLowerCase();
-}
-
-function formatTime(value) {
-  if (!Number.isFinite(value)) return '—:—';
-  const minutes = Math.floor(value / 60);
-  const seconds = Math.floor(value % 60).toString().padStart(2, '0');
-  return `${minutes}:${seconds}`;
-}
-
-function showToast(message) {
+function notify(message) {
+  const toast = byId('toast');
   toast.textContent = message;
   toast.classList.add('is-visible');
-  clearTimeout(state.toastTimer);
-  state.toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 5000);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.remove('is-visible'), 5000);
 }
 
-toast.addEventListener('click', () => {
-  toast.classList.remove('is-visible');
-  clearTimeout(state.toastTimer);
-});
-
-function extractYoutubeId(item) {
-  if (item.youtubeId && /^[A-Za-z0-9_-]{11}$/.test(item.youtubeId)) return item.youtubeId;
-  if (!item.youtubeUrl) return '';
-  try {
-    const url = new URL(item.youtubeUrl);
-    if (url.hostname === 'youtu.be') return url.pathname.slice(1).split('/')[0];
-    if (url.hostname.endsWith('youtube.com')) return url.searchParams.get('v') || url.pathname.split('/').pop();
-  } catch {
-    return '';
-  }
-  return '';
+function savePreferences() {
+  const snapshot = store.save(preferences);
+  preferences = snapshot.preferences;
+  byId('preferenceStatus').textContent = snapshot.message;
 }
 
-function currentTrack() { return tracks[state.currentIndex]; }
-function currentVideoId() { return extractYoutubeId(currentTrack()); }
-
-function renderExternalSources() {
-  const item = currentTrack();
-  const links = [];
-  const youtubeUrl = item.youtubeUrl || (item.youtubeId ? `https://www.youtube.com/watch?v=${item.youtubeId}` : '');
-  if (youtubeUrl) links.push(`<a class="source-link" href="${youtubeUrl}" target="_blank" rel="noreferrer">YouTube ↗</a>`);
-  if (item.spotifyUrl) links.push(`<a class="source-link" href="${item.spotifyUrl}" target="_blank" rel="noreferrer">Spotify ↗</a>`);
-  if (item.youtubeMusicUrl) links.push(`<a class="source-link" href="${item.youtubeMusicUrl}" target="_blank" rel="noreferrer">YT Music ↗</a>`);
-  externalSources.innerHTML = links.join('');
+function setStatus(next, detail = '') {
+  playerState = next;
+  statusDetail = detail;
+  document.body.dataset.playerState = next;
+  renderControls();
 }
 
-function shareSong(index, event) {
-  event.stopPropagation();
-  const track = tracks[index];
-  const url = `${window.location.origin}${window.location.pathname}?song=${index + 1}`;
-  navigator.clipboard.writeText(url).then(() => {
-    showToast(`Copied link to "${track.title}"`);
-  }).catch(() => {
-    showToast('Failed to copy link');
-  });
+function renderControls() {
+  const track = currentTrack();
+  const playing = playerState === 'playing';
+  const messages = {
+    idle: 'Ready when you are. YouTube loads only when you choose to play.',
+    loading: 'Loading YouTube…', ready: 'Ready. Press Play to listen.', playing: 'Playing on YouTube.',
+    paused: 'Paused.', buffering: 'Buffering on YouTube…', ended: 'Queue finished. Choose a song or press Play.',
+    error: 'YouTube could not play this source. Retry or use an external link.'
+  };
+  byId('availability').textContent = !track.youtubeId ? 'Unavailable here: the original source ID is incomplete. Search YouTube below.' : statusDetail || messages[playerState];
+  byId('playButton').setAttribute('aria-label', playing ? 'Pause' : 'Play');
+  byId('playButton').disabled = !track.youtubeId;
+  const glyph = byId('playButton').querySelector('.play-glyph');
+  if (glyph) glyph.textContent = playing ? 'Ⅱ' : '▶';
+  byId('playButton').classList.toggle('is-playing', playing);
+  byId('shuffleButton').setAttribute('aria-pressed', String(preferences.shuffle));
+  byId('shuffleButton').classList.toggle('is-active', preferences.shuffle);
+  byId('repeatButton').setAttribute('aria-pressed', String(preferences.repeat !== 'none'));
+  byId('repeatButton').setAttribute('aria-label', `Repeat: ${preferences.repeat === 'none' ? 'off' : preferences.repeat}. Change repeat mode`);
+  byId('repeatButton').setAttribute('title', `Repeat ${preferences.repeat === 'none' ? 'off' : preferences.repeat}`);
+  byId('repeatButton').dataset.mode = preferences.repeat;
+  byId('repeatButton').classList.toggle('is-active', preferences.repeat !== 'none');
+  byId('volume').value = String(preferences.volume);
+  byId('volumeButton').setAttribute('aria-label', preferences.volume === 0 ? 'Unmute' : 'Mute');
+  byId('volumeButton').setAttribute('aria-pressed', String(preferences.volume === 0));
+  byId('currentFavorite').setAttribute('aria-pressed', String(preferences.favorites.includes(selectedId)));
+  byId('currentFavorite').setAttribute('aria-label', preferences.favorites.includes(selectedId) ? 'Remove current song from favorites' : 'Favorite current song');
+  byId('retryButton').hidden = playerState !== 'error' || !track.youtubeId;
+  byId('loadPlayerButton').hidden = playerReady || playerState === 'loading';
+  byId('loadPlayerButton').disabled = !track.youtubeId;
+  byId('seek').disabled = !playerReady || !Number.isFinite(durations.get(selectedId));
+}
+
+function sourceLink(label, href) {
+  const link = document.createElement('a');
+  link.className = 'source-link';
+  link.href = href;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.textContent = label;
+  return link;
+}
+
+function renderSources() {
+  const track = currentTrack();
+  const fragment = document.createDocumentFragment();
+  const url = youtubeUrl(track);
+  if (url) fragment.append(sourceLink('Open on YouTube ↗', url));
+  if (spotifyUrl(track)) fragment.append(sourceLink('Open on Spotify ↗', spotifyUrl(track)));
+  if (appleMusicUrl(track)) fragment.append(sourceLink('Open on Apple Music ↗', appleMusicUrl(track)));
+  if (candidateUrl(track)) fragment.append(sourceLink(`Possible match: ${track.candidateLabel} ↗`, candidateUrl(track)));
+  fragment.append(sourceLink('Search YouTube ↗', searchUrl(track)));
+  byId('externalSources').replaceChildren(fragment);
+}
+
+function favorite(id) {
+  preferences.favorites = preferences.favorites.includes(id) ? preferences.favorites.filter(item => item !== id) : [...preferences.favorites, id];
+  savePreferences();
+  renderControls();
+  renderPlaylist();
 }
 
 function renderPlaylist() {
-  const query = state.searchQuery.toLowerCase().trim();
-  const filteredTracks = query
-    ? tracks.filter(t => t.title.toLowerCase().includes(query) || t.artist.toLowerCase().includes(query))
-    : tracks;
-
-  if (filteredTracks.length === 0) {
-    playlistList.innerHTML = '<div class="playlist-empty">No songs found</div>';
-    return;
+  const focused = document.activeElement;
+  const focusedId = focused?.dataset?.track;
+  const focusedAction = focused?.dataset?.action;
+  const wasInList = Boolean(focused?.closest('#playlistList'));
+  const results = filterTracks(tracks, { query: byId('playlistSearch').value, filter, ...preferences });
+  const fragment = document.createDocumentFragment();
+  for (const track of results) {
+    const row = document.createElement('li');
+    row.className = `song-row${track.id === selectedId ? ' is-current' : ''}`;
+    row.dataset.track = track.id;
+    const select = document.createElement('button');
+    select.type = 'button';
+    select.className = 'song-select';
+    select.dataset.track = track.id;
+    select.dataset.action = 'select';
+    if (track.id === selectedId) select.setAttribute('aria-current', 'true');
+    select.setAttribute('aria-label', `Play ${track.title}${track.youtubeId ? '' : ' (source unavailable)'}`);
+    const index = document.createElement('span');
+    index.className = 'song-index';
+    index.textContent = String(tracks.indexOf(track) + 1).padStart(2, '0');
+    const details = document.createElement('span');
+    details.className = 'song-details';
+    const title = document.createElement('span');
+    title.className = 'song-title';
+    title.textContent = track.title;
+    const meta = document.createElement('span');
+    meta.className = 'song-meta';
+    meta.textContent = `${artistLabel(track)} · ${track.youtubeId ? 'Unverified source' : 'Source unavailable'}`;
+    details.append(title, meta);
+    select.append(index, details);
+    select.addEventListener('click', () => selectTrack(track.id, true));
+    const actions = document.createElement('div');
+    actions.className = 'song-actions';
+    const favoriteButton = document.createElement('button');
+    favoriteButton.type = 'button';
+    favoriteButton.className = 'song-favorite';
+    favoriteButton.textContent = preferences.favorites.includes(track.id) ? '♥' : '♡';
+    favoriteButton.setAttribute('aria-label', `Favorite ${track.title}`);
+    favoriteButton.setAttribute('aria-pressed', String(preferences.favorites.includes(track.id)));
+    favoriteButton.dataset.track = track.id;
+    favoriteButton.dataset.action = 'favorite';
+    favoriteButton.addEventListener('click', () => favorite(track.id));
+    const share = document.createElement('button');
+    share.type = 'button';
+    share.className = 'song-share';
+    share.textContent = 'Share';
+    share.setAttribute('aria-label', `Share ${track.title}`);
+    share.dataset.track = track.id;
+    share.dataset.action = 'share';
+    share.addEventListener('click', event => shareTrack(track, event.currentTarget));
+    actions.append(favoriteButton, share);
+    row.append(select, actions);
+    fragment.append(row);
   }
-
-  playlistList.innerHTML = filteredTracks.map((item) => {
-    const index = tracks.indexOf(item);
-    const youtubeUrl = item.youtubeUrl || (item.youtubeId ? `https://www.youtube.com/watch?v=${item.youtubeId}` : '');
-    const source = youtubeUrl
-      ? `<a class="song-search" href="${youtubeUrl}" target="_blank" rel="noreferrer" aria-label="Open ${item.title} on YouTube">↗</a>`
-      : '<span class="song-unavailable">Unavailable</span>';
-    const duration = trackDurations[index] ? `<span class="song-duration">${trackDurations[index]}</span>` : '';
-    const share = `<a class="song-share" href="javascript:void(0)" data-index="${index}" aria-label="Share ${item.title}" title="Copy share link">↗</a>`;
-
-    return `
-      <article class="song-row ${index === state.currentIndex ? 'is-current' : ''}" data-index="${index}" tabindex="0" role="button" aria-label="Select ${item.title}">
-        <span class="song-index">${String(index + 1).padStart(2, '0')}</span>
-        <div>
-          <h3>${item.title}</h3>
-          <p>${item.artist}</p>
-        </div>
-        ${duration}
-        ${source}
-        ${share}
-      </article>
-    `;
-  }).join('');
-
-  playlistList.querySelectorAll('.song-row').forEach((row) => {
-    const select = (event) => {
-      if (event.target.closest('.song-search') || event.target.closest('.song-share')) return;
-      setTrack(Number(row.dataset.index));
-    };
-    row.addEventListener('click', select);
-    row.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(event); }
-    });
-  });
-
-  playlistList.querySelectorAll('.song-share').forEach((btn) => {
-    btn.addEventListener('click', (event) => {
-      event.stopPropagation();
-      shareSong(Number(btn.dataset.index), event);
-    });
-  });
-
-  // Auto-scroll to current track
-  const currentRow = playlistList.querySelector('.song-row.is-current');
-  if (currentRow) {
-    currentRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (!results.length) {
+    const empty = document.createElement('li');
+    empty.className = 'playlist-empty';
+    empty.textContent = filter === 'recent' ? 'No recently played songs match. Songs appear here after playback starts.' : filter === 'favorites' ? 'No favorites match. Use a heart to save a song.' : 'No songs match. Try another title or artist.';
+    fragment.append(empty);
+  }
+  byId('playlistList').replaceChildren(fragment);
+  byId('resultCount').textContent = `${results.length} of ${tracks.length} songs`;
+  byId('clearFilters').hidden = !byId('playlistSearch').value && filter === 'all';
+  for (const mode of ['all', 'favorites', 'recent']) byId(`filter${mode[0].toUpperCase()}${mode.slice(1)}`).setAttribute('aria-pressed', String(filter === mode));
+  if (wasInList && focusedId && focusedAction) {
+    const replacement = [...byId('playlistList').querySelectorAll('button')].find(button => button.dataset.track === focusedId && button.dataset.action === focusedAction);
+    if (replacement) replacement.focus({ preventScroll: true });
+    else byId(`filter${filter[0].toUpperCase()}${filter.slice(1)}`).focus({ preventScroll: true });
   }
 }
 
-function updateTrackTitle(title) {
-  trackTitleText.innerHTML = title;
-  // Add marquee for long titles
-  if (title.length > 25) {
-    trackTitleText.innerHTML = `<span class="marquee">${title} &nbsp;&nbsp;&nbsp; ${title}</span>`;
-  }
-}
-
-function updatePlayer() {
-  const item = currentTrack();
-  const videoId = currentVideoId();
-  const sourceAvailable = Boolean(videoId);
-
-  trackNumber.textContent = String(state.currentIndex + 1).padStart(2, '0');
-  updateTrackTitle(item.title);
-  trackArtist.textContent = item.artist;
-  elapsed.textContent = '0:00';
-  duration.textContent = '—:—';
-  seek.value = 0;
-  playGlyph.textContent = '▶';
-  playButton.classList.toggle('is-unavailable', !sourceAvailable);
-  playButton.setAttribute('aria-label', sourceAvailable ? `Play ${item.title}` : `${item.title} is unavailable`);
-  availability.textContent = state.sourceError
-    ? 'Unavailable here · YouTube could not play this source'
-    : sourceAvailable
-      ? state.playerReady ? 'Verified YouTube source · ready to play' : 'YouTube player loading…'
-      : 'Unavailable here · no verified YouTube source';
-  renderExternalSources();
+function renderSelection() {
+  const track = currentTrack();
+  byId('trackTitleText').textContent = track.title;
+  byId('trackArtist').textContent = artistLabel(track);
+  byId('trackNumber').textContent = String(ids.indexOf(track.id) + 1).padStart(2, '0');
+  byId('elapsed').textContent = '0:00';
+  byId('duration').textContent = formatTime(durations.get(selectedId));
+  byId('seek').value = '0';
+  renderSources();
+  renderControls();
   renderPlaylist();
 }
 
-function togglePlaylist(force) {
-  const shouldOpen = typeof force === 'boolean' ? force : !playlistPanel.classList.contains('is-open');
-  playlistPanel.classList.toggle('is-open', shouldOpen);
-  playlistPanel.setAttribute('aria-hidden', String(!shouldOpen));
-  playlistToggle.setAttribute('aria-expanded', String(shouldOpen));
-  queueButton.setAttribute('aria-expanded', String(shouldOpen));
+function fail(message) {
+  clearTimeout(startupTimer);
+  clearTimeout(playbackTimer);
+  playIntent = false;
+  requesting = false;
+  initializationVersion += 1;
+  setStatus('error', message);
+  if (playerReady) player.pauseVideo();
 }
 
-function toggleShortcuts(force) {
-  const shouldOpen = typeof force === 'boolean' ? force : !shortcutsOverlay.classList.contains('is-visible');
-  shortcutsOverlay.classList.toggle('is-visible', shouldOpen);
-  shortcutsOverlay.setAttribute('aria-hidden', String(!shouldOpen));
+function revealVideo() {
+  // Intentional controls bring the actual video into view before starting it.
+  byId('videoFrame').scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' });
 }
 
-function cueCurrentTrack() {
-  if (!state.playerReady || !state.player) return;
-  const videoId = currentVideoId();
-  state.sourceError = false;
-  state.loadedVideoId = videoId;
-  if (videoId) state.player.cueVideoById(videoId);
-  else state.player.stopVideo();
-  updatePlayer();
+function loadYoutubeApi() {
+  if (window.YT?.Player) return Promise.resolve();
+  if (apiPromise) return apiPromise;
+  apiPromise = new Promise((resolve, reject) => {
+    const previous = window.onYouTubeIframeAPIReady;
+    let settled = false;
+    const finish = error => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) { apiPromise = null; apiScript?.remove(); apiScript = null; reject(error); }
+      else resolve();
+    };
+    window.onYouTubeIframeAPIReady = () => {
+      if (typeof previous === 'function') previous();
+      window.YT?.Player ? finish() : finish(new Error('YouTube API unavailable'));
+    };
+    const timer = setTimeout(() => finish(new Error('YouTube took too long to load. Check your connection, then retry.')), 15000);
+    apiScript = document.createElement('script');
+    apiScript.src = 'https://www.youtube.com/iframe_api';
+    apiScript.async = true;
+    apiScript.onerror = () => finish(new Error('YouTube could not load. Check your connection, then retry.'));
+    document.head.append(apiScript);
+  });
+  return apiPromise;
 }
 
-function getNextIndex() {
-  if (state.shuffle) {
-    let next;
-    do {
-      next = Math.floor(Math.random() * tracks.length);
-    } while (next === state.currentIndex && tracks.length > 1);
-    return next;
-  }
-  return (state.currentIndex + 1) % tracks.length;
+function armPlaybackTimeout() {
+  clearTimeout(playbackTimer);
+  playbackTimer = setTimeout(() => {
+    if (playIntent && ['loading', 'buffering'].includes(playerState)) fail('Playback did not start. Press Retry or open this song on YouTube.');
+  }, 18000);
 }
 
-function getPrevIndex() {
-  if (state.shuffle) {
-    let prev;
-    do {
-      prev = Math.floor(Math.random() * tracks.length);
-    } while (prev === state.currentIndex && tracks.length > 1);
-    return prev;
-  }
-  return (state.currentIndex - 1 + tracks.length) % tracks.length;
+function playCurrent() {
+  if (!playerReady || !player || !playIntent) return;
+  const videoId = currentTrack().youtubeId;
+  if (!videoId) { player.stopVideo(); loadedVideoId = null; setStatus('idle'); return; }
+  loadedVideoId = videoId;
+  setStatus('loading', 'Starting the selected song…');
+  armPlaybackTimeout();
+  if (player.getVideoData?.().video_id === videoId && player.getPlayerState?.() !== 0) player.playVideo();
+  else player.loadVideoById(videoId);
 }
 
-function setTrack(index) {
-  state.currentIndex = (index + tracks.length) % tracks.length;
-  state.isPlaying = true;
-  state.sourceError = false;
-  if (!state.playerReady || !state.player) {
-    cueCurrentTrack();
-    updatePlayer();
+async function ensurePlayer(shouldPlay) {
+  if (!currentTrack().youtubeId) return;
+  playIntent = shouldPlay;
+  if (playerReady) {
+    if (shouldPlay) playCurrent();
     return;
   }
-  const videoId = currentVideoId();
-  if (videoId) {
-    state.loadedVideoId = videoId;
-    state.player.loadVideoById(videoId);
-  } else {
-    state.player.stopVideo();
-    cueCurrentTrack();
+  if (requesting) return;
+  requesting = true;
+  const attempt = ++initializationVersion;
+  setStatus('loading');
+  try {
+    await loadYoutubeApi();
+    if (!requesting || attempt !== initializationVersion) return;
+    // Always read the latest selection and intent in onReady.
+    startupTimer = setTimeout(() => fail('The YouTube player did not become ready. Press Retry or use an external link.'), 15000);
+    // Once an iframe exists, no app artwork or controls cover its own controls.
+    byId('videoPlaceholder').hidden = true;
+    player = new window.YT.Player('youtubePlayer', {
+      width: '100%', height: '100%',
+      playerVars: { autoplay: 0, controls: 1, playsinline: 1, rel: 0, ...(window.location.protocol.startsWith('http') ? { origin: window.location.origin } : {}) },
+      events: {
+        onReady(event) {
+          if (event.target !== player || attempt !== initializationVersion) return;
+          clearTimeout(startupTimer);
+          requesting = false;
+          playerReady = true;
+          player.setVolume(preferences.volume);
+          byId('videoPlaceholder').hidden = true;
+          const iframe = player.getIframe();
+          iframe.title = 'YouTube video player';
+          iframe.setAttribute('tabindex', '0');
+          if (playIntent) playCurrent();
+          else {
+            playIntent = false;
+            const pausedDetail = playerState === 'paused' ? statusDetail : '';
+            loadedVideoId = currentTrack().youtubeId;
+            if (loadedVideoId) player.cueVideoById(loadedVideoId);
+            setStatus(pausedDetail ? 'paused' : 'ready', pausedDetail);
+          }
+        },
+        onStateChange(event) {
+          if (!validVideoEvent(event)) return;
+          // The iframe may deliver queued events after a newer load request.
+          if (typeof player.getPlayerState === 'function' && player.getPlayerState() !== event.data) return;
+          const states = window.YT.PlayerState;
+          if (playerState === 'error') {
+            if (event.data === states.PLAYING || event.data === states.BUFFERING) player.pauseVideo();
+            return;
+          }
+          if (event.data === states.PLAYING) {
+            clearTimeout(playbackTimer);
+            playIntent = true;
+            setStatus('playing');
+            preferences.recent = [selectedId, ...preferences.recent.filter(id => id !== selectedId)].slice(0, ids.length);
+            savePreferences();
+            const total = player.getDuration();
+            if (Number.isFinite(total) && total > 0) durations.set(selectedId, total);
+            renderPlaylist();
+            updateProgress();
+          } else if (event.data === states.PAUSED) {
+            clearTimeout(playbackTimer);
+            playIntent = false;
+            setStatus('paused', playerState === 'paused' ? statusDetail : '');
+          } else if (event.data === states.BUFFERING) {
+            setStatus('buffering');
+            armPlaybackTimeout();
+          } else if (event.data === states.CUED) {
+            if (!playIntent && playerState !== 'paused') setStatus('ready');
+          } else if (event.data === states.ENDED) {
+            clearTimeout(playbackTimer);
+            playIntent = false;
+            advance(true);
+          }
+        },
+        onError(event) {
+          if (event.target !== player || loadedVideoId !== currentTrack().youtubeId) return;
+          const observed = player.getVideoData?.().video_id;
+          if (observed && observed !== loadedVideoId) return;
+          const errors = {
+            2: 'YouTube rejected this song link (error 2). Open it on YouTube or search for another recording.',
+            5: 'The browser or YouTube could not play this video (error 5). Try another browser or open it on YouTube.',
+            100: 'This YouTube video is unavailable or private (error 100). Search for another recording.',
+            101: 'The uploader does not allow this video to play on other websites (error 101). Open it on YouTube.',
+            150: 'The uploader does not allow this video to play on other websites (error 150). Open it on YouTube.',
+            153: 'YouTube could not identify this website (error 153). Try the published site or open the song on YouTube.'
+          };
+          fail(errors[event.data] || `YouTube playback failed (error ${Number.isInteger(event.data) ? event.data : 'unknown'}). Open the song on YouTube or try another source.`);
+        },
+        onAutoplayBlocked() {
+          if (playerState === 'error') return;
+          clearTimeout(playbackTimer);
+          playIntent = false;
+          setStatus('ready', 'Your browser blocked playback. Press Play again or use the video controls.');
+        }
+      }
+    });
+  } catch (error) {
+    if (attempt === initializationVersion) fail(error instanceof Error ? error.message : 'YouTube failed to load. Please retry.');
   }
-  updatePlayer();
-  if (playlistPanel.classList.contains('is-open')) togglePlaylist(false);
+}
 
-  if (currentVideoId()) showToast(`${currentTrack().title} is playing.`);
-  else showToast(`${currentTrack().title} is unavailable until a verified YouTube source is added.`);
+function selectTrack(id, shouldPlay = false, updateQueue = true, reveal = true) {
+  if (!ids.includes(id)) return;
+  selectedId = id;
+  if (updateQueue) queue = selectQueue(queue, id);
+  preferences.lastSelected = id;
+  savePreferences();
+  playIntent = shouldPlay;
+  clearTimeout(playbackTimer);
+  loadedVideoId = null;
+  if (playerReady) player.stopVideo();
+  setStatus('idle');
+  renderSelection();
+  try { window.history.replaceState(null, '', permanentLink(window.location.href, id)); } catch { /* Local-file/privacy contexts may restrict history. */ }
+  if (currentTrack().youtubeId) {
+    if (shouldPlay) {
+      if (reveal) revealVideo();
+      void ensurePlayer(true);
+    }
+  } else {
+    playIntent = false;
+    notify('This source ID is incomplete. Use Search YouTube to find the song.');
+  }
+}
+
+function advance(auto = false) {
+  const result = nextTrack(queue, { repeat: preferences.repeat, auto });
+  queue = result.queue;
+  if (!result.id) { playIntent = false; setStatus('ended'); return; }
+  selectTrack(result.id, true, false, !auto);
+}
+
+function goPrevious() {
+  const result = previousTrack(queue);
+  queue = result.queue;
+  if (result.id) selectTrack(result.id, true, false);
+  else notify('You are at the start of the queue.');
 }
 
 function togglePlayback() {
-  const videoId = currentVideoId();
-  if (!videoId) {
-    showToast('This song is unavailable here because it has no verified YouTube source yet.');
-    return;
-  }
-  if (!state.playerReady || !state.player) {
-    showToast('The YouTube player is still loading. Try again in a moment.');
-    return;
-  }
-
-  const playerState = state.player.getPlayerState();
-  if (playerState === window.YT.PlayerState.PLAYING) state.player.pauseVideo();
-  else if (state.loadedVideoId !== videoId) state.player.loadVideoById(videoId);
-  else state.player.playVideo();
+  if (!currentTrack().youtubeId) return;
+  if (playerReady && playerState === 'playing') { playIntent = false; player.pauseVideo(); }
+  else { revealVideo(); void ensurePlayer(true); }
 }
 
 function updateProgress() {
-  if (!state.playerReady || !state.player || !state.isPlaying) return;
-  const current = state.player.getCurrentTime();
-  const total = state.player.getDuration();
+  if (!playerReady || loadedVideoId !== currentTrack().youtubeId || player.getVideoData?.().video_id !== loadedVideoId) return;
+  const current = player.getCurrentTime();
+  const total = player.getDuration();
   if (!Number.isFinite(total) || total <= 0) return;
-  elapsed.textContent = formatTime(current);
-  duration.textContent = formatTime(total);
-  seek.value = String((current / total) * 100);
+  durations.set(selectedId, total);
+  byId('elapsed').textContent = formatTime(current);
+  byId('duration').textContent = formatTime(total);
+  byId('seek').disabled = false;
+  if (document.activeElement !== byId('seek')) byId('seek').value = String(Math.min(100, Math.max(0, current / total * 100)));
+  byId('seek').setAttribute('aria-valuetext', `${formatTime(current)} of ${formatTime(total)}`);
 }
 
-function fetchDurations() {
-  // Fetch durations from YouTube iframe API
-  tracks.forEach((track, index) => {
-    const videoId = extractYoutubeId(track);
-    if (videoId && state.playerReady && state.player) {
-      // YouTube doesn't have a direct method, so we get it when the video loads
-      // For now, we'll update durations as videos play
+function setVolume(value) {
+  preferences.volume = clampVolume(value);
+  if (preferences.volume > 0) preferences.lastVolume = preferences.volume;
+  if (playerReady) { player.unMute(); player.setVolume(preferences.volume); }
+  savePreferences();
+  renderControls();
+}
+
+function toggleShuffle() {
+  preferences.shuffle = !preferences.shuffle;
+  queue = setQueueShuffle(queue, preferences.shuffle);
+  savePreferences();
+  renderControls();
+  notify(preferences.shuffle ? 'Shuffle on. Each song plays once per queue.' : 'Shuffle off.');
+}
+
+function cycleRepeat() {
+  preferences.repeat = REPEAT_MODES[(REPEAT_MODES.indexOf(preferences.repeat) + 1) % REPEAT_MODES.length];
+  savePreferences();
+  renderControls();
+  notify(`Repeat ${preferences.repeat === 'none' ? 'off' : preferences.repeat}.`);
+}
+
+function showManualShare(url, invoker) {
+  const dialog = byId('manualShareDialog');
+  manualShareInvoker = invoker;
+  byId('manualShareUrl').value = url;
+  if (!dialog.open) dialog.showModal();
+  byId('manualShareUrl').focus();
+  byId('manualShareUrl').select();
+}
+
+async function shareTrack(track, invoker) {
+  const url = permanentLink(window.location.href, track.id);
+  if (typeof navigator.share === 'function') {
+    try { await navigator.share({ title: track.title, text: `Listen to ${track.title} on Odia Gita`, url }); return; }
+    catch (error) { if (error?.name === 'AbortError') return; }
+  }
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(url); notify('Song link copied.'); return; } catch { /* Use a selectable link. */ }
+  }
+  showManualShare(url, invoker);
+}
+
+byId('playButton').addEventListener('click', togglePlayback);
+byId('loadPlayerButton').addEventListener('click', () => { revealVideo(); void ensurePlayer(false); });
+byId('retryButton').addEventListener('click', () => {
+  clearTimeout(startupTimer);
+  clearTimeout(playbackTimer);
+  if (player && !playerReady) {
+    player.destroy?.(); player = null;
+    if (!byId('youtubePlayer')) {
+      const host = document.createElement('div'); host.id = 'youtubePlayer'; byId('videoFrame').append(host);
     }
-  });
+  }
+  requesting = false;
+  revealVideo();
+  void ensurePlayer(true);
+});
+byId('previousButton').addEventListener('click', goPrevious);
+byId('nextButton').addEventListener('click', () => advance());
+byId('shuffleButton').addEventListener('click', toggleShuffle);
+byId('repeatButton').addEventListener('click', cycleRepeat);
+byId('volume').addEventListener('input', event => setVolume(Number(event.target.value)));
+byId('volumeButton').addEventListener('click', () => setVolume(preferences.volume > 0 ? 0 : preferences.lastVolume));
+byId('currentFavorite').addEventListener('click', () => favorite(selectedId));
+byId('shareButton').addEventListener('click', event => shareTrack(currentTrack(), event.currentTarget));
+byId('playlistSearch').addEventListener('input', renderPlaylist);
+for (const mode of ['all', 'favorites', 'recent']) {
+  byId(`filter${mode[0].toUpperCase()}${mode.slice(1)}`).addEventListener('click', () => { filter = mode; renderPlaylist(); });
 }
-
-function onYoutubeReady(event) {
-  state.playerReady = true;
-  state.player = event.target;
-  state.player.setVolume(state.volume);
-  document.querySelector('.player-dock').classList.remove('loading-pulse');
-  updatePlayer();
-  cueCurrentTrack();
+byId('clearFilters').addEventListener('click', () => { filter = 'all'; byId('playlistSearch').value = ''; renderPlaylist(); byId('playlistSearch').focus(); });
+byId('clearPreferences').addEventListener('click', () => {
+  const snapshot = store.clear();
+  preferences = { ...snapshot.preferences, lastSelected: selectedId };
+  queue = createQueue(ids, selectedId, false);
+  filter = 'all';
+  byId('playlistSearch').value = '';
+  byId('preferenceStatus').textContent = snapshot.message;
+  if (playerReady) { player.unMute(); player.setVolume(preferences.volume); }
+  renderControls(); renderPlaylist(); notify('Preferences reset.');
+});
+byId('seek').addEventListener('input', event => {
+  if (!playerReady || loadedVideoId !== currentTrack().youtubeId) return;
+  const total = player.getDuration();
+  const value = Number(event.target.value);
+  if (Number.isFinite(total) && total > 0 && Number.isFinite(value)) {
+    player.seekTo(Math.min(100, Math.max(0, value)) / 100 * total, true);
+    byId('elapsed').textContent = formatTime(value / 100 * total);
+  }
+});
+const shortcutsDialog = byId('shortcutsDialog');
+function openShortcuts() {
+  if (shortcutsDialog.open) return;
+  shortcutsDialog.showModal();
+  byId('shortcutsClose').focus();
 }
-
-function onYoutubeStateChange(event) {
-  const states = window.YT.PlayerState;
-  state.isPlaying = event.data === states.PLAYING;
-  if (event.data === states.ENDED) {
-    if (state.repeat === 'one') {
-      state.player.loadVideoById(currentVideoId());
-      return;
-    }
-    const nextIndex = getNextIndex();
-    if (nextIndex === 0 && state.repeat === 'none' && !state.shuffle) {
-      state.player.stopVideo();
-      state.isPlaying = false;
-      updatePlayer();
-      return;
-    }
-    setTrack(nextIndex);
-    return;
-  }
-
-  // Fetch duration when video starts playing
-  if (event.data === states.PLAYING) {
-    const total = state.player.getDuration();
-    if (total > 0) {
-      trackDurations[state.currentIndex] = formatTime(total);
-      renderPlaylist();
-    }
-  }
-
-  playGlyph.textContent = state.isPlaying ? 'Ⅱ' : '▶';
-  playButton.setAttribute('aria-label', state.isPlaying ? `Pause ${currentTrack().title}` : `Play ${currentTrack().title}`);
-  availability.textContent = state.isPlaying ? 'Playing through YouTube' : 'Verified YouTube source · paused';
-}
-
-function onYoutubeError() {
-  state.isPlaying = false;
-  state.sourceError = true;
-  updatePlayer();
-  showToast('YouTube could not play this source. Try the external link or another verified ID.');
-}
-
-function initYoutubePlayer() {
-  if (state.player || !window.YT?.Player) return;
-  const origin = /^https?:$/.test(window.location.protocol) ? window.location.origin : undefined;
-  document.querySelector('.player-dock').classList.add('loading-pulse');
-  state.player = new window.YT.Player('youtubePlayer', {
-    width: '1',
-    height: '1',
-    playerVars: { autoplay: 0, controls: 0, playsinline: 1, rel: 0, modestbranding: 1, ...(origin ? { origin } : {}) },
-    events: { onReady: onYoutubeReady, onStateChange: onYoutubeStateChange, onError: onYoutubeError }
-  });
-}
-
-// Shuffle
-shuffleButton.addEventListener('click', () => {
-  state.shuffle = !state.shuffle;
-  shuffleButton.classList.toggle('is-active', state.shuffle);
-  showToast(state.shuffle ? 'Shuffle on' : 'Shuffle off');
+byId('shortcutsToggle').addEventListener('click', openShortcuts);
+byId('shortcutsClose').addEventListener('click', () => shortcutsDialog.close());
+shortcutsDialog.addEventListener('close', () => byId('shortcutsToggle').focus({ preventScroll: true }));
+byId('manualShareClose').addEventListener('click', () => byId('manualShareDialog').close());
+byId('manualShareDialog').addEventListener('close', () => {
+  const invoker = manualShareInvoker;
+  const replacement = invoker?.isConnected ? invoker : [...byId('playlistList').querySelectorAll('button')].find(button => button.dataset.action === 'share' && button.dataset.track === invoker?.dataset?.track);
+  (replacement || byId('shareButton')).focus({ preventScroll: true });
+  manualShareInvoker = null;
 });
-
-// Repeat
-repeatButton.addEventListener('click', () => {
-  const modes = ['none', 'all', 'one'];
-  const currentModeIndex = modes.indexOf(state.repeat);
-  state.repeat = modes[(currentModeIndex + 1) % modes.length];
-  repeatButton.classList.toggle('is-active', state.repeat !== 'none');
-  const labels = { none: 'Repeat off', all: 'Repeat all', one: 'Repeat one' };
-  repeatButton.textContent = state.repeat === 'one' ? '🔂' : '🔁';
-  showToast(labels[state.repeat]);
+document.addEventListener('keydown', event => {
+  if (event.defaultPrevented || event.altKey || event.metaKey || event.repeat || shortcutsDialog.open || byId('manualShareDialog').open || shouldIgnoreShortcut(event.target)) return;
+  let action;
+  if (event.key === ' ' && !event.ctrlKey) action = togglePlayback;
+  else if (event.key === 'ArrowRight' && event.ctrlKey) action = () => advance();
+  else if (event.key === 'ArrowLeft' && event.ctrlKey) action = goPrevious;
+  else if (event.key.toLowerCase() === 's' && !event.ctrlKey) action = toggleShuffle;
+  else if (event.key.toLowerCase() === 'r' && !event.ctrlKey) action = cycleRepeat;
+  else if (event.key === '?' && !event.ctrlKey) action = openShortcuts;
+  if (action) { event.preventDefault(); action(); }
 });
-
-// Volume
-volumeSlider.addEventListener('input', () => {
-  state.volume = Number(volumeSlider.value);
-  if (state.playerReady && state.player) state.player.setVolume(state.volume);
-  volumeButton.textContent = state.volume === 0 ? '🔇' : state.volume < 50 ? '🔉' : '🔊';
+window.addEventListener('offline', () => {
+  if (['playing', 'loading', 'buffering'].includes(playerState)) { if (playerReady) player.pauseVideo(); fail('You are offline. Reconnect, then press Retry or use an external link.'); }
 });
-
-volumeButton.addEventListener('click', () => {
-  if (state.volume > 0) {
-    state.volume = 0;
-  } else {
-    state.volume = 100;
-  }
-  volumeSlider.value = String(state.volume);
-  if (state.playerReady && state.player) state.player.setVolume(state.volume);
-  volumeButton.textContent = state.volume === 0 ? '🔇' : state.volume < 50 ? '🔉' : '🔊';
-});
-
-// Playlist search
-playlistSearch.addEventListener('input', () => {
-  state.searchQuery = playlistSearch.value;
-  renderPlaylist();
-});
-
-// Seek tooltip
-seek.addEventListener('mouseover', () => {
-  const total = state.player?.getDuration() || 0;
-  if (total > 0) {
-    const percent = Number(seek.value) / 100;
-    seekTooltip.textContent = formatTime(percent * total);
-  }
-});
-
-// Keyboard shortcuts overlay
-shortcutsToggle.addEventListener('click', () => toggleShortcuts());
-shortcutsClose.addEventListener('click', () => toggleShortcuts(false));
-shortcutsOverlay.addEventListener('click', (event) => {
-  if (event.target === shortcutsOverlay) toggleShortcuts(false);
-});
-
-// Controls
-$('#previousButton').addEventListener('click', () => setTrack(getPrevIndex()));
-$('#nextButton').addEventListener('click', () => setTrack(getNextIndex()));
-playButton.addEventListener('click', togglePlayback);
-playlistToggle.addEventListener('click', () => togglePlaylist());
-queueButton.addEventListener('click', () => togglePlaylist());
-$('#playlistClose').addEventListener('click', () => togglePlaylist(false));
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    togglePlaylist(false);
-    toggleShortcuts(false);
-  }
-  if (event.key === ' ' && event.target.tagName !== 'INPUT') {
-    event.preventDefault();
-    togglePlayback();
-  }
-  if (event.key === 'ArrowRight' && event.ctrlKey) {
-    event.preventDefault();
-    setTrack(getNextIndex());
-  }
-  if (event.key === 'ArrowLeft' && event.ctrlKey) {
-    event.preventDefault();
-    setTrack(getPrevIndex());
-  }
-  if (event.key === 's' && event.target.tagName !== 'INPUT') {
-    event.preventDefault();
-    state.shuffle = !state.shuffle;
-    shuffleButton.classList.toggle('is-active', state.shuffle);
-    showToast(state.shuffle ? 'Shuffle on' : 'Shuffle off');
-  }
-  if (event.key === 'r' && event.target.tagName !== 'INPUT') {
-    event.preventDefault();
-    const modes = ['none', 'all', 'one'];
-    const currentModeIndex = modes.indexOf(state.repeat);
-    state.repeat = modes[(currentModeIndex + 1) % modes.length];
-    repeatButton.classList.toggle('is-active', state.repeat !== 'none');
-    const labels = { none: 'Repeat off', all: 'Repeat all', one: 'Repeat one' };
-    repeatButton.textContent = state.repeat === 'one' ? '🔂' : '🔁';
-    showToast(labels[state.repeat]);
-  }
-});
-
-seek.addEventListener('input', () => {
-  if (!state.playerReady || !state.player) return;
-  const total = state.player.getDuration();
-  if (Number.isFinite(total) && total > 0) state.player.seekTo((Number(seek.value) / 100) * total, true);
-});
-
-window.addEventListener('youtube-api-ready', initYoutubePlayer);
-if (window.YT?.Player) initYoutubePlayer();
-
-updateClock();
-setInterval(updateClock, 30000);
+byId('preferenceStatus').textContent = store.read().message;
+if (byId('catalogCount')) byId('catalogCount').textContent = String(tracks.length);
+renderSelection();
+if (linkSelection.error) notify(linkSelection.error);
 setInterval(updateProgress, 500);
-
-// Real-time visitor counter using countapi.xyz (free, no server needed)
-function updateVisitorCounter() {
-  fetch('https://api.countapi.xyz/hit/odia-romantic/visits')
-    .then(r => r.json())
-    .then(data => {
-      onlineCount.textContent = String(data.value);
-    })
-    .catch(() => {
-      onlineCount.textContent = '—';
-    });
-}
-updateVisitorCounter();
-
-// Check URL for song parameter
-const urlParams = new URLSearchParams(window.location.search);
-const songParam = urlParams.get('song');
-if (songParam) {
-  const songIndex = parseInt(songParam) - 1;
-  if (songIndex >= 0 && songIndex < tracks.length) {
-    setTrack(songIndex);
-  }
-}
-
-updatePlayer();
