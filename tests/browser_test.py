@@ -164,12 +164,38 @@ def run(browser_name, release=False):
         expect(page.locator('#trackTitleText')).to_have_text('Phulara Sahare Gharate Tolichi')
         page.wait_for_function("(() => { const rect = document.querySelector('#videoFrame').getBoundingClientRect(); return rect.bottom > 0 && rect.top < innerHeight; })()")
         page.locator('footer').scroll_into_view_if_needed()
-        expect(page.locator('#availability')).to_contain_text('offscreen',ignore_case=True)
-        assert page.evaluate('window.__yt.state') == 2
-        page.locator('#playButton').click()
-        page.wait_for_function('window.__yt.state === 1')
+        page.wait_for_timeout(150)
+        expect(page.locator('#availability')).to_contain_text('Playing')
+        assert page.evaluate('window.__yt.state') == 1
         page.set_viewport_size({'width':1440,'height':1000})
-        checks.append('Selecting a distant mobile song reveals the video; scrolling it away pauses playback')
+        checks.append('Selecting a distant mobile song reveals the video; scrolling does not force a pause')
+
+        page.evaluate("""() => {
+          Object.defineProperty(document, 'hidden', {configurable:true, get:() => true});
+          Object.defineProperty(document, 'visibilityState', {configurable:true, get:() => 'hidden'});
+          window.__pauseCount = window.__ytCalls.filter(call => call[0] === 'pause').length;
+          document.dispatchEvent(new Event('visibilitychange'));
+        }""")
+        page.wait_for_timeout(150)
+        assert page.evaluate('window.__yt.state') == 1
+        page.evaluate('window.__yt.emit(1)')
+        assert page.evaluate('window.__yt.state') == 1
+        assert page.evaluate("window.__ytCalls.filter(call => call[0] === 'pause').length === window.__pauseCount")
+        page.evaluate('window.__yt.emit(0)')
+        expect(page.locator('#availability')).to_contain_text('finished',ignore_case=True)
+        page.locator('#repeatButton').click()
+        page.locator('#playButton').click()
+        page.evaluate('window.__yt.emit(0)')
+        expect(page.locator('#trackTitleText')).to_have_text('Faguna Re Faguna')
+        assert page.evaluate('window.__yt.state') == 1
+        page.evaluate("""() => {
+          delete document.hidden;
+          delete document.visibilityState;
+          document.dispatchEvent(new Event('visibilitychange'));
+        }""")
+        page.locator('#repeatButton').click()
+        page.locator('#repeatButton').click()
+        checks.append('Simulated tab hiding, hidden PLAYING events and automatic queue advance do not force pauses')
 
         page.evaluate('window.__yt.emit(3)')
         expect(page.locator('#availability')).to_contain_text('buffer',ignore_case=True)
@@ -215,6 +241,21 @@ def run(browser_name, release=False):
         assert not errors, errors
         context.close()
         checks.append('Malformed URL rejected and latest selection wins while API is loading')
+
+        context, page, external, errors = open_page(delayed=True)
+        page.locator('#playButton').click()
+        page.wait_for_function('typeof window.__releaseYT === "function"')
+        page.evaluate("""() => {
+          Object.defineProperty(document, 'hidden', {configurable:true, get:() => true});
+          Object.defineProperty(document, 'visibilityState', {configurable:true, get:() => 'hidden'});
+          document.dispatchEvent(new Event('visibilitychange'));
+          window.__releaseYT();
+        }""")
+        page.wait_for_function('window.__yt && window.__yt.state === 1')
+        expect(page.locator('#availability')).to_contain_text('Playing')
+        assert not errors, errors
+        context.close()
+        checks.append('An intentional play request survives a simulated tab switch during API loading')
 
         context, page, external, errors = open_page('?song=20')
         page.locator('#playButton').click()

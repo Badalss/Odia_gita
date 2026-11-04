@@ -205,24 +205,9 @@ function fail(message) {
   if (playerReady) player.pauseVideo();
 }
 
-function videoIsVisible() {
-  const rect = byId('videoFrame').getBoundingClientRect();
-  const width = Math.max(0, Math.min(rect.right, window.innerWidth) - Math.max(rect.left, 0));
-  const height = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
-  return rect.width > 0 && rect.height > 0 && width * height / (rect.width * rect.height) >= 0.5;
-}
-
 function revealVideo() {
   // Intentional controls bring the actual video into view before starting it.
   byId('videoFrame').scrollIntoView({ behavior: 'instant', block: 'center', inline: 'nearest' });
-}
-
-function pauseForOffscreen() {
-  if (playerState === 'error') return;
-  playIntent = false;
-  clearTimeout(playbackTimer);
-  setStatus('paused', 'Paused because the video is offscreen. Return to the video and press Play.');
-  if (playerReady) player.pauseVideo();
 }
 
 function loadYoutubeApi() {
@@ -261,7 +246,6 @@ function armPlaybackTimeout() {
 
 function playCurrent() {
   if (!playerReady || !player || !playIntent) return;
-  if (!videoIsVisible()) { pauseForOffscreen(); return; }
   const videoId = currentTrack().youtubeId;
   if (!videoId) { player.stopVideo(); loadedVideoId = null; setStatus('idle'); return; }
   loadedVideoId = videoId;
@@ -303,7 +287,7 @@ async function ensurePlayer(shouldPlay) {
           const iframe = player.getIframe();
           iframe.title = 'YouTube video player';
           iframe.setAttribute('tabindex', '0');
-          if (playIntent && !document.hidden) playCurrent();
+          if (playIntent) playCurrent();
           else {
             playIntent = false;
             const pausedDetail = playerState === 'paused' ? statusDetail : '';
@@ -322,8 +306,6 @@ async function ensurePlayer(shouldPlay) {
             return;
           }
           if (event.data === states.PLAYING) {
-            if (document.hidden) { playIntent = false; player.pauseVideo(); setStatus('paused', 'Paused while this tab is hidden. Return here and press Play.'); return; }
-            if (!videoIsVisible()) { pauseForOffscreen(); return; }
             clearTimeout(playbackTimer);
             playIntent = true;
             setStatus('playing');
@@ -392,7 +374,6 @@ function selectTrack(id, shouldPlay = false, updateQueue = true, reveal = true) 
 }
 
 function advance(auto = false) {
-  if (auto && !videoIsVisible()) { pauseForOffscreen(); return; }
   const result = nextTrack(queue, { repeat: preferences.repeat, auto });
   queue = result.queue;
   if (!result.id) { playIntent = false; setStatus('ended'); return; }
@@ -543,26 +524,9 @@ document.addEventListener('keydown', event => {
   else if (event.key === '?' && !event.ctrlKey) action = openShortcuts;
   if (action) { event.preventDefault(); action(); }
 });
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    playIntent = false;
-    if (playerReady) player.pauseVideo();
-    if (['playing', 'loading', 'buffering'].includes(playerState)) setStatus('paused', 'Paused while this tab is hidden. Return here and press Play.');
-  }
-});
 window.addEventListener('offline', () => {
   if (['playing', 'loading', 'buffering'].includes(playerState)) { if (playerReady) player.pauseVideo(); fail('You are offline. Reconnect, then press Retry or use an external link.'); }
 });
-function pauseIfOffscreen() {
-  if ((playIntent || ['playing', 'buffering'].includes(playerState)) && !videoIsVisible()) pauseForOffscreen();
-}
-if ('IntersectionObserver' in window) {
-  const visibilityObserver = new IntersectionObserver(pauseIfOffscreen, { threshold: [0, 0.5, 1] });
-  visibilityObserver.observe(byId('videoFrame'));
-} else {
-  window.addEventListener('scroll', pauseIfOffscreen, { passive: true });
-  window.addEventListener('resize', pauseIfOffscreen, { passive: true });
-}
 byId('preferenceStatus').textContent = store.read().message;
 if (byId('catalogCount')) byId('catalogCount').textContent = String(tracks.length);
 renderSelection();

@@ -18,7 +18,7 @@ as a file: browser modules, storage and YouTube origin identification require it
 ## Features
 
 - Visible YouTube video, loaded after an intentional Play or Load video action.
-- Selecting a distant song reveals its video; scrolling it offscreen pauses playback.
+- Selecting a distant song reveals its video; scrolling or switching tabs does not make the site pause it.
 - Search, favorites, recently played songs and readable source failure messages.
 - Repeat off/all/one, shuffled queue with listening history and restored mute volume.
 - Stable song links (`?track=jhum-jhum`); original `?song=2` links still resolve.
@@ -28,7 +28,12 @@ as a file: browser modules, storage and YouTube origin identification require it
 Favorites and history stay in this browser; there is no cross-device sync.
 Clearing preferences removes only this site's namespaced preference entry.
 YouTube provides video playback and may display ads or restrict availability.
-The site does not download or cache music, extract audio, or provide background playback.
+The site does not download or cache music or extract audio. It leaves playback
+to YouTube and the browser when you switch tabs or minimize the window, rather
+than adding its own visibility-based pauses. Background or locked-screen
+playback is not guaranteed: browser, operating-system and YouTube restrictions
+still apply. YouTube's embed policies do not support offering background play
+as a service feature: https://developers.google.com/youtube/terms/developer-policies-guide.
 YouTube is not requested until the visitor chooses to load/play a video; external
 listening links are available even when the embed fails.
 

@@ -12,7 +12,7 @@ separate working tree was not edited.
 | Planned area | Delivered |
 |---|---|
 | Baseline/catalogue | Desktop/mobile baseline captures; twenty original entries with stable IDs, strict numbered/permanent links, validated source format and explicit unverified status |
-| Playback | Visible iframe, lazy API, cue without autoplay, accurate state feedback, retry/timeouts, race fencing, repeat modes, shuffle history, volume restore, offline and offscreen pause |
+| Playback | Visible iframe, lazy API, cue without autoplay, accurate state feedback, retry/timeouts, race fencing, repeat modes, shuffle history, volume restore and offline feedback; no application-forced pause on scrolling or tab hiding |
 | Design/accessibility | Responsive maroon/cream/gold design, original artwork, semantic song list, native dialogs with explicit focus restoration, labelled controls, visible focus and reduced-motion styling |
 | Personal features | Favorites, recently played after real PLAYING events, last selection/mode/volume preferences, safe temporary fallback, namespaced clear, native/clipboard/manual sharing |
 | Performance/presentation | Local fonts, optimized backgrounds, favicon, sharing image, metadata, helpful 404 and static release build |
@@ -25,10 +25,10 @@ separate working tree was not edited.
 | `npm run check` | All three application JavaScript modules passed syntax checks |
 | `npm test` | 11 Node tests passed, 0 failed |
 | `npm run build` | Static `dist/` release created, with no runtime dependencies |
-| `npm run test:browser` | 14 workflow groups passed in Chromium 153.0.8010.12 |
-| `python tests/browser_test.py --browser firefox` | Same 14 groups passed in Firefox 155.0 |
-| `python tests/browser_test.py --browser webkit` | Same 14 groups passed in Playwright WebKit 26.6 on Windows |
-| `python tests/browser_test.py --release` | Same 14 groups passed against the built `dist/` release in Chromium |
+| `npm run test:browser` | 16 workflow groups passed in Chromium 153.0.8010.12 |
+| `python tests/browser_test.py --browser firefox` | Same 16 groups passed in Firefox 155.0 |
+| `python tests/browser_test.py --browser webkit` | Same 16 groups passed in Playwright WebKit 26.6 on Windows |
+| `python tests/browser_test.py --release` | Same 16 groups passed against the built `dist/` release in Chromium |
 | `git diff --check` | Passed after removing a trailing blank line |
 | Real, unmocked YouTube initialization | API request failed `net::ERR_CERT_AUTHORITY_INVALID`; retry and external links appeared, with no JavaScript page error |
 | Initial page network | No third-party request before intentional video load/play |
@@ -36,9 +36,18 @@ separate working tree was not edited.
 
 The browser groups exercise search/empty states, favorites persistence, actual
 play-event history, keyboard/dialog focus, play/pause/seek/volume, repeat modes,
-shuffled history, iframe visibility, distant mobile selection/offscreen pause,
+shuffled history, iframe visibility, distant mobile selection,
 embedding errors/retry, API failures, delayed startup, offline/retry races,
 strict links, storage denial/corruption, namespaced clear and manual sharing.
+
+At the user's request, application-forced pauses on tab hiding and scrolling
+were removed after the initial upgrade. Regression checks now simulate hidden
+document signals during playback and initialization, and check queue advancement
+while hidden. These checks prove the application does not issue those extra
+pause calls; they do not prove audible playback while an actual device is
+minimized, suspended or locked. No browser/YouTube restriction is bypassed and no
+automatic resume loop was added. The existing real-YouTube certificate limit
+still prevents end-to-end audio confirmation here.
 
 All automated player responses are mocked. They do not request or play music
 from a provider. Tests run under the `/Odia_gita/` project subpath and take
