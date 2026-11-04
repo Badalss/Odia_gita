@@ -1,0 +1,17 @@
+{
+  "name": "odia-gita",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A small, personal collection of Odia love songs.",
+  "scripts": {
+    "dev": "python -m http.server 4173 --bind 127.0.0.1",
+    "check": "node scripts/check.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:browser": "python tests/browser_test.py",
+    "build": "node scripts/build.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
