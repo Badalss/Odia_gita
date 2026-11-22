@@ -182,6 +182,9 @@ input[type='range'] { width: 100%; height: 5px; margin: 0; accent-color: var(--s
 .source-link { display: inline-flex; align-items: center; gap: 4px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 99px; color: var(--muted); font-size: 9px; text-decoration: none; transition: 180ms ease; }
 .source-link:hover { border-color: var(--saffron); color: var(--cream); }
 
+.background-note { display: none; margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.4; text-align: center; }
+@media (hover: none) and (pointer: coarse) { .background-note { display: block; } }
+
 .playlist-panel { position: fixed; z-index: 5; top: 18px; right: 18px; bottom: 18px; display: flex; width: min(410px, calc(100vw - 36px)); flex-direction: column; padding: 25px; border: 1px solid rgba(255, 239, 210, 0.2); border-radius: 28px; background: var(--glass-strong); box-shadow: var(--shadow); opacity: 0; pointer-events: none; transform: translateX(30px); transition: 220ms ease; backdrop-filter: blur(24px); }
 .playlist-panel.is-open { opacity: 1; pointer-events: auto; transform: translateX(0); }
 .playlist-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }
