@@ -214,8 +214,8 @@ function renderPlaylist() {
 
 function updateTrackTitle(title) {
   trackTitleText.textContent = title;
-  // Scroll long titles: two copies so the loop is seamless
-  if (title.length > 25) {
+  // Scroll titles that do not fit: two copies so the loop is seamless
+  if (trackTitleText.offsetWidth > trackTitleText.parentElement.clientWidth) {
     trackTitleText.innerHTML = `<span class="marquee"><span>${title}</span><span aria-hidden="true">${title}</span></span>`;
   }
 }
@@ -506,6 +506,9 @@ seek.addEventListener('input', () => {
   const total = state.player.getDuration();
   if (Number.isFinite(total) && total > 0) state.player.seekTo((Number(seek.value) / 100) * total, true);
 });
+
+window.addEventListener('resize', () => updateTrackTitle(currentTrack().title));
+document.fonts?.ready.then(() => updateTrackTitle(currentTrack().title));
 
 window.addEventListener('youtube-api-ready', initYoutubePlayer);
 if (window.YT?.Player) initYoutubePlayer();

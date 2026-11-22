@@ -109,7 +109,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 
 .content {
   position: relative;
-  z-index: 2;
+  z-index: 4;
   min-height: calc(100svh - 74px);
   padding: clamp(28px, 8vh, 100px) clamp(22px, 6vw, 96px) 34px;
   display: flex;
