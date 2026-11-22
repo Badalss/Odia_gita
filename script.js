@@ -41,6 +41,7 @@ const state = {
   isPlaying: false,
   toastTimer: null,
   sourceError: false,
+  hasStarted: false,
   shuffle: false,
   repeat: 'none', // none, one, all
   volume: 100,
@@ -49,7 +50,6 @@ const state = {
 
 const $ = (selector) => document.querySelector(selector);
 const clock = $('#clock');
-const onlineCount = $('#onlineCount');
 const trackNumber = $('#trackNumber');
 const trackTitleText = $('#trackTitleText');
 const trackArtist = $('#trackArtist');
@@ -64,6 +64,7 @@ const playlistPanel = $('#playlistPanel');
 const playlistList = $('#playlistList');
 const playlistToggle = $('#playlistToggle');
 const queueButton = $('#queueButton');
+const topPlaylistButton = $('#topPlaylistButton');
 const externalSources = $('#externalSources');
 const toast = $('#toast');
 const shuffleButton = $('#shuffleButton');
@@ -74,6 +75,23 @@ const playlistSearch = $('#playlistSearch');
 const shortcutsToggle = $('#shortcutsToggle');
 const shortcutsOverlay = $('#shortcutsOverlay');
 const shortcutsClose = $('#shortcutsClose');
+
+const svg = (body) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const icons = {
+  play: svg('<path d="M7 4.5v15l12-7.5z" fill="currentColor"/>'),
+  pause: svg('<path d="M8 5v14M16 5v14" stroke-width="3"/>'),
+  previous: svg('<path d="M19 5v14l-10-7z" fill="currentColor"/><path d="M5 5v14"/>'),
+  next: svg('<path d="M5 5v14l10-7z" fill="currentColor"/><path d="M19 5v14"/>'),
+  shuffle: svg('<path d="M16 3h5v5"/><path d="M4 20 21 3"/><path d="M21 16v5h-5"/><path d="m15 15 6 6"/><path d="m4 4 5 5"/>'),
+  repeat: svg('<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/>'),
+  repeatOne: svg('<path d="m17 2 4 4-4 4"/><path d="M3 11V9a3 3 0 0 1 3-3h15"/><path d="m7 22-4-4 4-4"/><path d="M21 13v2a3 3 0 0 1-3 3H3"/><path d="M11 10h1v4"/>'),
+  volume: svg('<path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/>'),
+  volumeLow: svg('<path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/>'),
+  volumeMute: svg('<path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="m16 9 5 6M21 9l-5 6"/>'),
+  external: svg('<path d="M7 17 17 7"/><path d="M8 7h9v9"/>'),
+  link: svg('<path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/>')
+};
+document.querySelectorAll('[data-icon]').forEach((el) => { el.innerHTML = icons[el.dataset.icon]; });
 
 function updateClock() {
   clock.textContent = new Intl.DateTimeFormat('en-IN', { hour: 'numeric', minute: '2-digit' }).format(new Date()).toLowerCase();
@@ -124,8 +142,7 @@ function renderExternalSources() {
   externalSources.innerHTML = links.join('');
 }
 
-function shareSong(index, event) {
-  event.stopPropagation();
+function shareSong(index) {
   const track = tracks[index];
   const url = `${window.location.origin}${window.location.pathname}?song=${index + 1}`;
   navigator.clipboard.writeText(url).then(() => {
@@ -150,10 +167,10 @@ function renderPlaylist() {
     const index = tracks.indexOf(item);
     const youtubeUrl = item.youtubeUrl || (item.youtubeId ? `https://www.youtube.com/watch?v=${item.youtubeId}` : '');
     const source = youtubeUrl
-      ? `<a class="song-search" href="${youtubeUrl}" target="_blank" rel="noreferrer" aria-label="Open ${item.title} on YouTube">↗</a>`
+      ? `<a class="song-search" href="${youtubeUrl}" target="_blank" rel="noreferrer" aria-label="Open ${item.title} on YouTube" title="Open on YouTube">${icons.external}</a>`
       : '<span class="song-unavailable">Unavailable</span>';
     const duration = trackDurations[index] ? `<span class="song-duration">${trackDurations[index]}</span>` : '';
-    const share = `<a class="song-share" href="javascript:void(0)" data-index="${index}" aria-label="Share ${item.title}" title="Copy share link">↗</a>`;
+    const share = `<button class="song-share" type="button" data-index="${index}" aria-label="Copy link to ${item.title}" title="Copy link">${icons.link}</button>`;
 
     return `
       <article class="song-row ${index === state.currentIndex ? 'is-current' : ''}" data-index="${index}" tabindex="0" role="button" aria-label="Select ${item.title}">
@@ -176,6 +193,7 @@ function renderPlaylist() {
     };
     row.addEventListener('click', select);
     row.addEventListener('keydown', (event) => {
+      if (event.target !== row) return;
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); select(event); }
     });
   });
@@ -183,7 +201,7 @@ function renderPlaylist() {
   playlistList.querySelectorAll('.song-share').forEach((btn) => {
     btn.addEventListener('click', (event) => {
       event.stopPropagation();
-      shareSong(Number(btn.dataset.index), event);
+      shareSong(Number(btn.dataset.index));
     });
   });
 
@@ -195,17 +213,37 @@ function renderPlaylist() {
 }
 
 function updateTrackTitle(title) {
-  trackTitleText.innerHTML = title;
-  // Add marquee for long titles
-  if (title.length > 25) {
-    trackTitleText.innerHTML = `<span class="marquee">${title} &nbsp;&nbsp;&nbsp; ${title}</span>`;
+  trackTitleText.textContent = title;
+  // Scroll titles that do not fit: two copies so the loop is seamless
+  if (trackTitleText.offsetWidth > trackTitleText.parentElement.clientWidth) {
+    trackTitleText.innerHTML = `<span class="marquee"><span>${title}</span><span aria-hidden="true">${title}</span></span>`;
+  }
+}
+
+function updatePlayState() {
+  const title = currentTrack().title;
+  playGlyph.innerHTML = state.isPlaying ? icons.pause : icons.play;
+  if (!currentVideoId()) {
+    playButton.setAttribute('aria-label', `${title} is unavailable`);
+    availability.textContent = 'Unavailable here · no verified YouTube source';
+  } else if (state.sourceError) {
+    playButton.setAttribute('aria-label', `Play ${title}`);
+    availability.textContent = 'Unavailable here · YouTube could not play this source';
+  } else if (!state.playerReady) {
+    playButton.setAttribute('aria-label', `Play ${title}`);
+    availability.textContent = 'YouTube player loading…';
+  } else if (state.isPlaying) {
+    playButton.setAttribute('aria-label', `Pause ${title}`);
+    availability.textContent = 'Playing through YouTube';
+  } else {
+    playButton.setAttribute('aria-label', `Play ${title}`);
+    availability.textContent = state.hasStarted ? 'Verified YouTube source · paused' : 'Verified YouTube source · ready to play';
   }
 }
 
 function updatePlayer() {
   const item = currentTrack();
-  const videoId = currentVideoId();
-  const sourceAvailable = Boolean(videoId);
+  const sourceAvailable = Boolean(currentVideoId());
 
   trackNumber.textContent = String(state.currentIndex + 1).padStart(2, '0');
   updateTrackTitle(item.title);
@@ -213,14 +251,8 @@ function updatePlayer() {
   elapsed.textContent = '0:00';
   duration.textContent = '—:—';
   seek.value = 0;
-  playGlyph.textContent = '▶';
   playButton.classList.toggle('is-unavailable', !sourceAvailable);
-  playButton.setAttribute('aria-label', sourceAvailable ? `Play ${item.title}` : `${item.title} is unavailable`);
-  availability.textContent = state.sourceError
-    ? 'Unavailable here · YouTube could not play this source'
-    : sourceAvailable
-      ? state.playerReady ? 'Verified YouTube source · ready to play' : 'YouTube player loading…'
-      : 'Unavailable here · no verified YouTube source';
+  updatePlayState();
   renderExternalSources();
   renderPlaylist();
 }
@@ -231,6 +263,7 @@ function togglePlaylist(force) {
   playlistPanel.setAttribute('aria-hidden', String(!shouldOpen));
   playlistToggle.setAttribute('aria-expanded', String(shouldOpen));
   queueButton.setAttribute('aria-expanded', String(shouldOpen));
+  topPlaylistButton.setAttribute('aria-expanded', String(shouldOpen));
 }
 
 function toggleShortcuts(force) {
@@ -243,6 +276,7 @@ function cueCurrentTrack() {
   if (!state.playerReady || !state.player) return;
   const videoId = currentVideoId();
   state.sourceError = false;
+  state.hasStarted = false;
   state.loadedVideoId = videoId;
   if (videoId) state.player.cueVideoById(videoId);
   else state.player.stopVideo();
@@ -273,7 +307,8 @@ function getPrevIndex() {
 
 function setTrack(index) {
   state.currentIndex = (index + tracks.length) % tracks.length;
-  state.isPlaying = true;
+  state.isPlaying = false;
+  state.hasStarted = false;
   state.sourceError = false;
   if (!state.playerReady || !state.player) {
     cueCurrentTrack();
@@ -291,7 +326,7 @@ function setTrack(index) {
   updatePlayer();
   if (playlistPanel.classList.contains('is-open')) togglePlaylist(false);
 
-  if (currentVideoId()) showToast(`${currentTrack().title} is playing.`);
+  if (currentVideoId()) showToast(`Loading ${currentTrack().title}…`);
   else showToast(`${currentTrack().title} is unavailable until a verified YouTube source is added.`);
 }
 
@@ -320,17 +355,6 @@ function updateProgress() {
   elapsed.textContent = formatTime(current);
   duration.textContent = formatTime(total);
   seek.value = String((current / total) * 100);
-}
-
-function fetchDurations() {
-  // Fetch durations from YouTube iframe API
-  tracks.forEach((track, index) => {
-    const videoId = extractYoutubeId(track);
-    if (videoId && state.playerReady && state.player) {
-      // YouTube doesn't have a direct method, so we get it when the video loads
-      // For now, we'll update durations as videos play
-    }
-  });
 }
 
 function onYoutubeReady(event) {
@@ -370,9 +394,11 @@ function onYoutubeStateChange(event) {
     }
   }
 
-  playGlyph.textContent = state.isPlaying ? 'Ⅱ' : '▶';
-  playButton.setAttribute('aria-label', state.isPlaying ? `Pause ${currentTrack().title}` : `Play ${currentTrack().title}`);
-  availability.textContent = state.isPlaying ? 'Playing through YouTube' : 'Verified YouTube source · paused';
+  if (state.isPlaying) {
+    state.hasStarted = true;
+    state.sourceError = false;
+  }
+  updatePlayState();
 }
 
 function onYoutubeError() {
@@ -394,41 +420,37 @@ function initYoutubePlayer() {
   });
 }
 
-// Shuffle
-shuffleButton.addEventListener('click', () => {
+function toggleShuffle() {
   state.shuffle = !state.shuffle;
   shuffleButton.classList.toggle('is-active', state.shuffle);
+  shuffleButton.setAttribute('aria-pressed', String(state.shuffle));
   showToast(state.shuffle ? 'Shuffle on' : 'Shuffle off');
-});
+}
 
-// Repeat
-repeatButton.addEventListener('click', () => {
+function cycleRepeat() {
   const modes = ['none', 'all', 'one'];
-  const currentModeIndex = modes.indexOf(state.repeat);
-  state.repeat = modes[(currentModeIndex + 1) % modes.length];
-  repeatButton.classList.toggle('is-active', state.repeat !== 'none');
   const labels = { none: 'Repeat off', all: 'Repeat all', one: 'Repeat one' };
-  repeatButton.textContent = state.repeat === 'one' ? '🔂' : '🔁';
+  state.repeat = modes[(modes.indexOf(state.repeat) + 1) % modes.length];
+  repeatButton.classList.toggle('is-active', state.repeat !== 'none');
+  repeatButton.innerHTML = state.repeat === 'one' ? icons.repeatOne : icons.repeat;
+  repeatButton.setAttribute('aria-label', labels[state.repeat]);
   showToast(labels[state.repeat]);
-});
+}
+
+shuffleButton.addEventListener('click', toggleShuffle);
+repeatButton.addEventListener('click', cycleRepeat);
 
 // Volume
-volumeSlider.addEventListener('input', () => {
-  state.volume = Number(volumeSlider.value);
-  if (state.playerReady && state.player) state.player.setVolume(state.volume);
-  volumeButton.textContent = state.volume === 0 ? '🔇' : state.volume < 50 ? '🔉' : '🔊';
-});
+function setVolume(value) {
+  state.volume = value;
+  volumeSlider.value = String(value);
+  if (state.playerReady && state.player) state.player.setVolume(value);
+  volumeButton.innerHTML = value === 0 ? icons.volumeMute : value < 50 ? icons.volumeLow : icons.volume;
+  volumeButton.setAttribute('aria-label', value === 0 ? 'Unmute' : 'Mute');
+}
 
-volumeButton.addEventListener('click', () => {
-  if (state.volume > 0) {
-    state.volume = 0;
-  } else {
-    state.volume = 100;
-  }
-  volumeSlider.value = String(state.volume);
-  if (state.playerReady && state.player) state.player.setVolume(state.volume);
-  volumeButton.textContent = state.volume === 0 ? '🔇' : state.volume < 50 ? '🔉' : '🔊';
-});
+volumeSlider.addEventListener('input', () => setVolume(Number(volumeSlider.value)));
+volumeButton.addEventListener('click', () => setVolume(state.volume > 0 ? 0 : 100));
 
 // Playlist search
 playlistSearch.addEventListener('input', () => {
@@ -436,13 +458,13 @@ playlistSearch.addEventListener('input', () => {
   renderPlaylist();
 });
 
-// Seek tooltip
-seek.addEventListener('mouseover', () => {
-  const total = state.player?.getDuration() || 0;
-  if (total > 0) {
-    const percent = Number(seek.value) / 100;
-    seekTooltip.textContent = formatTime(percent * total);
-  }
+// Seek tooltip follows the pointer
+seek.addEventListener('mousemove', (event) => {
+  const rect = seek.getBoundingClientRect();
+  const percent = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
+  const total = state.player?.getDuration?.() || 0;
+  seekTooltip.style.left = `${percent * 100}%`;
+  seekTooltip.textContent = total > 0 ? formatTime(percent * total) : '—:—';
 });
 
 // Keyboard shortcuts overlay
@@ -458,40 +480,25 @@ $('#nextButton').addEventListener('click', () => setTrack(getNextIndex()));
 playButton.addEventListener('click', togglePlayback);
 playlistToggle.addEventListener('click', () => togglePlaylist());
 queueButton.addEventListener('click', () => togglePlaylist());
+topPlaylistButton.addEventListener('click', () => togglePlaylist());
 $('#playlistClose').addEventListener('click', () => togglePlaylist(false));
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     togglePlaylist(false);
     toggleShortcuts(false);
+    return;
   }
-  if (event.key === ' ' && event.target.tagName !== 'INPUT') {
-    event.preventDefault();
-    togglePlayback();
+  if (event.altKey || event.metaKey) return;
+  if (event.ctrlKey) {
+    if (event.key === 'ArrowRight') { event.preventDefault(); setTrack(getNextIndex()); }
+    if (event.key === 'ArrowLeft') { event.preventDefault(); setTrack(getPrevIndex()); }
+    return;
   }
-  if (event.key === 'ArrowRight' && event.ctrlKey) {
-    event.preventDefault();
-    setTrack(getNextIndex());
-  }
-  if (event.key === 'ArrowLeft' && event.ctrlKey) {
-    event.preventDefault();
-    setTrack(getPrevIndex());
-  }
-  if (event.key === 's' && event.target.tagName !== 'INPUT') {
-    event.preventDefault();
-    state.shuffle = !state.shuffle;
-    shuffleButton.classList.toggle('is-active', state.shuffle);
-    showToast(state.shuffle ? 'Shuffle on' : 'Shuffle off');
-  }
-  if (event.key === 'r' && event.target.tagName !== 'INPUT') {
-    event.preventDefault();
-    const modes = ['none', 'all', 'one'];
-    const currentModeIndex = modes.indexOf(state.repeat);
-    state.repeat = modes[(currentModeIndex + 1) % modes.length];
-    repeatButton.classList.toggle('is-active', state.repeat !== 'none');
-    const labels = { none: 'Repeat off', all: 'Repeat all', one: 'Repeat one' };
-    repeatButton.textContent = state.repeat === 'one' ? '🔂' : '🔁';
-    showToast(labels[state.repeat]);
-  }
+  // Leave typing and focused controls to the browser
+  if (event.target.closest('input, textarea, select, button, a, [role="button"]')) return;
+  if (event.key === ' ') { event.preventDefault(); togglePlayback(); }
+  if (event.key.toLowerCase() === 's') toggleShuffle();
+  if (event.key.toLowerCase() === 'r') cycleRepeat();
 });
 
 seek.addEventListener('input', () => {
@@ -500,6 +507,9 @@ seek.addEventListener('input', () => {
   if (Number.isFinite(total) && total > 0) state.player.seekTo((Number(seek.value) / 100) * total, true);
 });
 
+window.addEventListener('resize', () => updateTrackTitle(currentTrack().title));
+document.fonts?.ready.then(() => updateTrackTitle(currentTrack().title));
+
 window.addEventListener('youtube-api-ready', initYoutubePlayer);
 if (window.YT?.Player) initYoutubePlayer();
 
@@ -507,24 +517,11 @@ updateClock();
 setInterval(updateClock, 30000);
 setInterval(updateProgress, 500);
 
-// Real-time visitor counter using countapi.xyz (free, no server needed)
-function updateVisitorCounter() {
-  fetch('https://api.countapi.xyz/hit/odia-romantic/visits')
-    .then(r => r.json())
-    .then(data => {
-      onlineCount.textContent = String(data.value);
-    })
-    .catch(() => {
-      onlineCount.textContent = '—';
-    });
-}
-updateVisitorCounter();
-
 // Check URL for song parameter
 const urlParams = new URLSearchParams(window.location.search);
 const songParam = urlParams.get('song');
 if (songParam) {
-  const songIndex = parseInt(songParam) - 1;
+  const songIndex = parseInt(songParam, 10) - 1;
   if (songIndex >= 0 && songIndex < tracks.length) {
     setTrack(songIndex);
   }
